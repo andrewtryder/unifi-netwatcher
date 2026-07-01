@@ -1,28 +1,65 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-3xl font-bold mb-6">Tools & Import/Export</h1>
+<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-16 md:pb-0">
+    <div class="flex items-center justify-between mb-2">
+        <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface">Data Tools</h1>
+    </div>
 
-<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-    <div class="bg-white border rounded p-6 shadow-sm">
-        <h2 class="text-xl font-bold mb-4">Export Data</h2>
-        <div class="space-y-4">
-            <p class="text-gray-600 text-sm">Download your devices in standard formats.</p>
-            <div class="flex space-x-4">
-                <a href="/tools/export/trusted" download="trusted.txt" class="bg-blue-100 text-blue-700 px-4 py-2 rounded hover:bg-blue-200 font-semibold inline-block">Download trusted.txt</a>
-                <a href="/tools/export/csv" download="inventory.csv" class="bg-gray-100 text-gray-700 px-4 py-2 rounded hover:bg-gray-200 font-semibold inline-block">Download Full CSV</a>
+    <!-- Export Section -->
+    <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3 border-b border-outline pb-4">
+            <div class="w-10 h-10 rounded-lg bg-surface-variant flex items-center justify-center text-primary">
+                <span class="material-symbols-outlined">download</span>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-on-surface">Export Data</h2>
+                <p class="text-sm text-on-surface-variant">Download your device inventory to a CSV file</p>
             </div>
         </div>
+        <div class="pt-2">
+            <a href="/tools/export/csv" class="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
+                <span class="material-symbols-outlined text-sm">file_download</span> Download CSV
+            </a>
+        </div>
     </div>
-    
-    <div class="bg-white border rounded p-6 shadow-sm">
-        <h2 class="text-xl font-bold mb-4">Import trusted.txt</h2>
-        <p class="text-gray-600 text-sm mb-4">Upload a legacy <code>trusted.txt</code> file to bulk-trust devices. Inline comments will be imported as display names.</p>
-        
-        <form hx-post="/tools/htmx/import_trusted" hx-encoding="multipart/form-data" hx-target="#import-result">
-            <input type="file" name="file" accept=".txt" required class="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 mb-4"/>
-            <button type="submit" class="bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700">Import File</button>
+
+    <!-- Import Section -->
+    <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3 border-b border-outline pb-4">
+            <div class="w-10 h-10 rounded-lg bg-surface-variant flex items-center justify-center text-secondary">
+                <span class="material-symbols-outlined">upload</span>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-on-surface">Import Trusted Devices</h2>
+                <p class="text-sm text-on-surface-variant">Upload a legacy trusted.txt file or comma-separated list of MACs</p>
+            </div>
+        </div>
+        <form method="POST" action="/tools/import/trusted" enctype="multipart/form-data" class="pt-2 flex flex-col gap-4">
+            <div class="flex flex-col gap-2">
+                <label class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Select File</label>
+                <div class="relative">
+                    <input type="file" name="file" accept=".txt,.csv" required
+                           class="block w-full text-sm text-on-surface-variant
+                                  file:mr-4 file:py-2.5 file:px-4
+                                  file:rounded-lg file:border-0
+                                  file:text-sm file:font-medium
+                                  file:bg-surface-variant file:text-on-surface
+                                  hover:file:bg-surface-variant/80
+                                  border border-outline rounded-lg bg-background cursor-pointer">
+                </div>
+                <p class="text-xs text-outline mt-1">One MAC address per line.</p>
+            </div>
+            <div class="flex justify-end">
+                <button type="submit" class="inline-flex items-center gap-2 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
+                    <span class="material-symbols-outlined text-sm">upload_file</span> Upload & Import
+                </button>
+            </div>
         </form>
-        <div id="import-result"></div>
+        {% if import_msg %}
+        <div class="mt-4 p-4 rounded-lg bg-secondary/10 border border-secondary/20 text-secondary text-sm">
+            {{ import_msg }}
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

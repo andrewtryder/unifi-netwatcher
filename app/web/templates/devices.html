@@ -1,39 +1,61 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-3xl font-bold mb-6">Device Inventory</h1>
+<div class="flex flex-col gap-6 max-w-[1440px] mx-auto pb-16 md:pb-0">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface">Device Inventory</h1>
+    </div>
 
-<div class="overflow-x-auto">
-    <table class="min-w-full bg-white border">
-        <thead>
-            <tr class="bg-gray-100 text-gray-600 text-left text-sm uppercase">
-                <th class="py-3 px-4 border-b">Status</th>
-                <th class="py-3 px-4 border-b">MAC</th>
-                <th class="py-3 px-4 border-b">IP</th>
-                <th class="py-3 px-4 border-b">Name</th>
-                <th class="py-3 px-4 border-b">Actions</th>
-            </tr>
-        </thead>
-        <tbody class="text-sm">
-            {% for device in devices %}
-            <tr class="border-b hover:bg-gray-50">
-                <td class="py-3 px-4">
-                    {% if device.status == 'trusted' %}
-                        <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs font-bold">Trusted</span>
-                    {% elif device.status == 'ignored' %}
-                        <span class="bg-gray-200 text-gray-800 px-2 py-1 rounded text-xs font-bold">Ignored</span>
+    <div class="glass-panel rounded-xl overflow-hidden">
+        <div class="overflow-x-auto">
+            <table class="w-full text-left border-collapse">
+                <thead>
+                    <tr class="border-b border-outline bg-surface-variant/30">
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">MAC Address</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">IP Address</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Hostname</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Vendor</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Status</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Last Seen</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-outline">
+                    {% for device in devices %}
+                    <tr class="hover:bg-surface-variant/20 transition-colors">
+                        <td class="p-4 font-mono text-sm">{{ device.mac }}</td>
+                        <td class="p-4 font-mono text-sm text-on-surface-variant">{{ device.ip or '-' }}</td>
+                        <td class="p-4 text-sm">{{ device.hostname or '-' }}</td>
+                        <td class="p-4 text-sm text-on-surface-variant truncate max-w-[150px]">{{ device.vendor or '-' }}</td>
+                        <td class="p-4">
+                            {% if device.status == 'trusted' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">
+                                Trusted
+                            </span>
+                            {% elif device.status == 'ignored' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">
+                                Ignored
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">
+                                Unknown
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="p-4 font-mono text-xs text-on-surface-variant">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '-' }}</td>
+                        <td class="p-4 text-right">
+                            <a href="/devices/{{ device.mac }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors">
+                                <span class="material-symbols-outlined text-sm">visibility</span>
+                            </a>
+                        </td>
+                    </tr>
                     {% else %}
-                        <span class="bg-red-100 text-red-800 px-2 py-1 rounded text-xs font-bold">Unknown</span>
-                    {% endif %}
-                </td>
-                <td class="py-3 px-4 font-mono">{{ device.mac }}</td>
-                <td class="py-3 px-4">{{ device.ip or '-' }}</td>
-                <td class="py-3 px-4">{{ device.display_name or device.hostname or '-' }}</td>
-                <td class="py-3 px-4">
-                    <a href="/devices/{{ device.id }}" class="text-blue-600 hover:underline text-xs">View</a>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                    <tr>
+                        <td colspan="7" class="p-8 text-center text-on-surface-variant italic">No devices found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
 </div>
 {% endblock %}
