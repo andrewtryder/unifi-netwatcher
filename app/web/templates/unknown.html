@@ -1,11 +1,30 @@
 {% extends "base.html" %}
 {% block content %}
 <div class="flex flex-col gap-6 max-w-[1440px] mx-auto pb-16 md:pb-0">
-    <div class="flex items-center justify-between">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-error flex items-center gap-3">
             <span class="material-symbols-outlined text-3xl">warning</span>
             Unknown Devices
+            {% if devices %}
+            <span class="text-base font-medium text-on-surface-variant">({{ devices|length }})</span>
+            {% endif %}
         </h1>
+
+        {% if devices %}
+        <div class="flex flex-wrap items-center gap-2" id="bulk-actions">
+            <button type="button" id="bulk-trust-btn" disabled
+                    class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-secondary/10 text-secondary border border-secondary/20 text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-secondary/20">
+                <span class="material-symbols-outlined text-[18px]">check_circle</span>
+                <span>Trust selected</span>
+                <span id="bulk-trust-count" class="font-mono text-xs opacity-80"></span>
+            </button>
+            <button type="button" id="bulk-ignore-btn" disabled
+                    class="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-surface-variant text-on-surface-variant border border-outline text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-surface-variant/80">
+                <span class="material-symbols-outlined text-[18px]">visibility_off</span>
+                <span>Ignore selected</span>
+            </button>
+        </div>
+        {% endif %}
     </div>
 
     <div class="glass-panel rounded-xl overflow-hidden border-error/30">
@@ -13,6 +32,9 @@
             <table class="w-full text-left border-collapse">
                 <thead>
                     <tr class="border-b border-outline bg-surface-variant/30">
+                        <th class="p-4 w-10">
+                            <input type="checkbox" id="select-all" class="rounded border-outline text-primary focus:ring-primary bg-background" title="Select all">
+                        </th>
                         <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">MAC Address</th>
                         <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">IP Address</th>
                         <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Hostname</th>
@@ -23,7 +45,10 @@
                 </thead>
                 <tbody class="divide-y divide-outline" id="unknown-devices-tbody">
                     {% for device in devices %}
-                    <tr class="hover:bg-surface-variant/20 transition-colors group" id="row-{{ device.mac | replace(':', '-') }}">
+                    <tr class="hover:bg-surface-variant/20 transition-colors group" id="row-{{ device.id }}">
+                        <td class="p-4">
+                            <input type="checkbox" class="device-select rounded border-outline text-primary focus:ring-primary bg-background" value="{{ device.id }}">
+                        </td>
                         <td class="p-4 font-mono text-sm text-error">{{ device.mac }}</td>
                         <td class="p-4 font-mono text-sm text-on-surface-variant">{{ device.ip or '-' }}</td>
                         <td class="p-4 text-sm">{{ device.hostname or '-' }}</td>
@@ -31,15 +56,15 @@
                         <td class="p-4 font-mono text-xs text-on-surface-variant">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else '-' }}</td>
                         <td class="p-4 text-right">
                             <div class="flex items-center justify-end gap-2">
-                                <button hx-post="/api/devices/{{ device.mac }}/trust" hx-target="#row-{{ device.mac | replace(':', '-') }}" hx-swap="outerHTML"
+                                <button type="button" data-action="trust" data-device-id="{{ device.id }}"
                                         class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-secondary/10 hover:bg-secondary/20 text-secondary border border-secondary/20 transition-colors text-xs font-medium">
                                     <span class="material-symbols-outlined text-sm">check</span> Trust
                                 </button>
-                                <button hx-post="/api/devices/{{ device.mac }}/ignore" hx-target="#row-{{ device.mac | replace(':', '-') }}" hx-swap="outerHTML"
+                                <button type="button" data-action="ignore" data-device-id="{{ device.id }}"
                                         class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-surface-variant hover:bg-surface-variant/80 text-on-surface-variant border border-outline transition-colors text-xs font-medium">
                                     <span class="material-symbols-outlined text-sm">visibility_off</span> Ignore
                                 </button>
-                                <a href="/devices/{{ device.mac }}" class="inline-flex items-center justify-center p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors">
+                                <a href="/devices/{{ device.id }}" class="inline-flex items-center justify-center p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors">
                                     <span class="material-symbols-outlined text-sm">arrow_forward</span>
                                 </a>
                             </div>
@@ -47,7 +72,7 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="p-8 text-center text-on-surface-variant italic">
+                        <td colspan="7" class="p-8 text-center text-on-surface-variant italic">
                             <div class="flex flex-col items-center justify-center gap-3">
                                 <span class="material-symbols-outlined text-4xl text-secondary">verified</span>
                                 <span>No unknown devices found. Your network is clear.</span>
@@ -60,4 +85,87 @@
         </div>
     </div>
 </div>
+
+{% if devices %}
+<script>
+(function () {
+    const selectAll = document.getElementById('select-all');
+    const checkboxes = () => Array.from(document.querySelectorAll('.device-select'));
+    const bulkTrustBtn = document.getElementById('bulk-trust-btn');
+    const bulkIgnoreBtn = document.getElementById('bulk-ignore-btn');
+    const bulkTrustCount = document.getElementById('bulk-trust-count');
+
+    function selectedIds() {
+        return checkboxes().filter(cb => cb.checked).map(cb => Number(cb.value));
+    }
+
+    function updateBulkState() {
+        const ids = selectedIds();
+        const count = ids.length;
+        const allChecked = count > 0 && count === checkboxes().length;
+        selectAll.checked = allChecked;
+        selectAll.indeterminate = count > 0 && !allChecked;
+        bulkTrustBtn.disabled = count === 0;
+        bulkIgnoreBtn.disabled = count === 0;
+        bulkTrustCount.textContent = count > 0 ? `(${count})` : '';
+        checkboxes().forEach(cb => {
+            const row = document.getElementById(`row-${cb.value}`);
+            if (row) row.classList.toggle('bg-primary/5', cb.checked);
+        });
+    }
+
+    selectAll.addEventListener('change', () => {
+        checkboxes().forEach(cb => { cb.checked = selectAll.checked; });
+        updateBulkState();
+    });
+
+    checkboxes().forEach(cb => cb.addEventListener('change', updateBulkState));
+
+    async function deviceAction(path, ids) {
+        const response = await fetch(path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_ids: ids }),
+        });
+        if (!response.ok) throw new Error('Request failed');
+        return response.json();
+    }
+
+    async function singleAction(action, deviceId) {
+        await deviceAction(`/api/devices/bulk/${action}`, [deviceId]);
+        window.NetWatcher?.removeUnknownRows([deviceId]);
+    }
+
+    bulkTrustBtn.addEventListener('click', async () => {
+        const ids = selectedIds();
+        if (!ids.length) return;
+        bulkTrustBtn.disabled = true;
+        try {
+            await deviceAction('/api/devices/bulk/trust', ids);
+            window.NetWatcher?.removeUnknownRows(ids);
+        } finally {
+            bulkTrustBtn.disabled = false;
+        }
+    });
+
+    bulkIgnoreBtn.addEventListener('click', async () => {
+        const ids = selectedIds();
+        if (!ids.length) return;
+        bulkIgnoreBtn.disabled = true;
+        try {
+            await deviceAction('/api/devices/bulk/ignore', ids);
+            window.NetWatcher?.removeUnknownRows(ids);
+        } finally {
+            bulkIgnoreBtn.disabled = false;
+        }
+    });
+
+    document.querySelectorAll('[data-action]').forEach(btn => {
+        btn.addEventListener('click', () => singleAction(btn.dataset.action, Number(btn.dataset.deviceId)));
+    });
+
+    updateBulkState();
+})();
+</script>
+{% endif %}
 {% endblock %}

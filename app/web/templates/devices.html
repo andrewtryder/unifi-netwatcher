@@ -7,21 +7,51 @@
 
     <div class="glass-panel rounded-xl overflow-hidden">
         <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse">
+            <table class="w-full text-left border-collapse" id="inventory-table">
                 <thead>
                     <tr class="border-b border-outline bg-surface-variant/30">
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">MAC Address</th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">IP Address</th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Hostname</th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Vendor</th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Status</th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">Last Seen</th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="mac">
+                                MAC Address <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="ip">
+                                IP Address <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="hostname">
+                                Hostname <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="vendor">
+                                Vendor <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="status">
+                                Status <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
+                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="last_seen">
+                                Last Seen <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+                            </button>
+                        </th>
                         <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
                     </tr>
                 </thead>
-                <tbody class="divide-y divide-outline">
+                <tbody class="divide-y divide-outline" id="inventory-tbody">
                     {% for device in devices %}
-                    <tr class="hover:bg-surface-variant/20 transition-colors">
+                    <tr class="hover:bg-surface-variant/20 transition-colors"
+                        data-mac="{{ device.mac }}"
+                        data-ip="{{ device.ip or '' }}"
+                        data-hostname="{{ device.hostname or '' }}"
+                        data-vendor="{{ device.vendor or '' }}"
+                        data-status="{{ device.status }}"
+                        data-last-seen="{{ device.last_seen_at.isoformat() if device.last_seen_at else '' }}">
                         <td class="p-4 font-mono text-sm">{{ device.mac }}</td>
                         <td class="p-4 font-mono text-sm text-on-surface-variant">{{ device.ip or '-' }}</td>
                         <td class="p-4 text-sm">{{ device.hostname or '-' }}</td>
@@ -43,7 +73,7 @@
                         </td>
                         <td class="p-4 font-mono text-xs text-on-surface-variant">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '-' }}</td>
                         <td class="p-4 text-right">
-                            <a href="/devices/{{ device.mac }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors">
+                            <a href="/devices/{{ device.id }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors">
                                 <span class="material-symbols-outlined text-sm">visibility</span>
                             </a>
                         </td>
@@ -58,4 +88,72 @@
         </div>
     </div>
 </div>
+
+{% if devices %}
+<script>
+(function () {
+    const tbody = document.getElementById('inventory-tbody');
+    const headers = document.querySelectorAll('.sortable-th');
+    let currentKey = null;
+    let currentDir = 'asc';
+
+    function getSortValue(row, key) {
+        const map = {
+            mac: 'mac',
+            ip: 'ip',
+            hostname: 'hostname',
+            vendor: 'vendor',
+            status: 'status',
+            last_seen: 'lastSeen',
+        };
+        return (row.dataset[map[key]] || '').toLowerCase();
+    }
+
+    function compareValues(a, b, key) {
+        const aVal = getSortValue(a, key);
+        const bVal = getSortValue(b, key);
+        if (aVal === bVal) return 0;
+        if (!aVal) return 1;
+        if (!bVal) return -1;
+        return aVal < bVal ? -1 : 1;
+    }
+
+    function updateIndicators(activeKey, dir) {
+        headers.forEach((btn) => {
+            const indicator = btn.querySelector('.sort-indicator');
+            const key = btn.dataset.sortKey;
+            if (key === activeKey) {
+                indicator.textContent = dir === 'asc' ? 'arrow_upward' : 'arrow_downward';
+                indicator.classList.remove('opacity-40');
+                indicator.classList.add('text-primary', 'opacity-100');
+            } else {
+                indicator.textContent = 'unfold_more';
+                indicator.classList.add('opacity-40');
+                indicator.classList.remove('text-primary', 'opacity-100');
+            }
+        });
+    }
+
+    headers.forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const key = btn.dataset.sortKey;
+            if (currentKey === key) {
+                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                currentKey = key;
+                currentDir = 'asc';
+            }
+
+            const rows = Array.from(tbody.querySelectorAll('tr[data-mac]'));
+            rows.sort((a, b) => {
+                const result = compareValues(a, b, key);
+                return currentDir === 'asc' ? result : -result;
+            });
+            rows.forEach((row) => tbody.appendChild(row));
+            updateIndicators(key, currentDir);
+        });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}

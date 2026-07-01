@@ -31,27 +31,31 @@
             </div>
             <div>
                 <h2 class="text-lg font-semibold text-on-surface">Import Trusted Devices</h2>
-                <p class="text-sm text-on-surface-variant">Upload a legacy trusted.txt file or comma-separated list of MACs</p>
+                <p class="text-sm text-on-surface-variant">Upload a trusted.csv file with MAC addresses to mark as trusted</p>
             </div>
         </div>
-        <form method="POST" action="/tools/import/trusted" enctype="multipart/form-data" class="pt-2 flex flex-col gap-4">
-            <div class="flex flex-col gap-2">
+        <form method="POST" action="/tools/htmx/import_trusted" enctype="multipart/form-data" class="pt-2 flex flex-col gap-4">
+            <div class="flex flex-col gap-3">
                 <label class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Select File</label>
-                <div class="relative">
-                    <input type="file" name="file" accept=".txt,.csv" required
-                           class="block w-full text-sm text-on-surface-variant
-                                  file:mr-4 file:py-2.5 file:px-4
-                                  file:rounded-lg file:border-0
-                                  file:text-sm file:font-medium
-                                  file:bg-surface-variant file:text-on-surface
-                                  hover:file:bg-surface-variant/80
-                                  border border-outline rounded-lg bg-background cursor-pointer">
+                <div class="flex flex-wrap items-center gap-3">
+                    <label for="trusted-import-file" class="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-5 py-2.5 rounded-lg transition-colors text-sm cursor-pointer">
+                        <span class="material-symbols-outlined text-sm">upload_file</span> Choose File
+                    </label>
+                    <input type="file" id="trusted-import-file" name="file" accept=".csv,.txt" required class="sr-only">
+                    <span id="trusted-import-filename" class="text-sm text-on-surface-variant italic">No file chosen</span>
                 </div>
-                <p class="text-xs text-outline mt-1">One MAC address per line.</p>
+                <div class="rounded-lg border border-outline bg-background/50 p-4">
+                    <p class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono mb-2">Example format (trusted.csv)</p>
+                    <pre class="font-mono text-xs text-on-surface-variant leading-relaxed overflow-x-auto">mac,display_name
+aa:bb:cc:dd:ee:ff,Kitchen iPad
+11:22:33:44:55:66,Work Laptop
+de:ad:be:ef:00:01</pre>
+                    <p class="text-xs text-outline mt-2">One device per line. The <code class="font-mono text-on-surface-variant">display_name</code> column is optional. Lines starting with <code class="font-mono text-on-surface-variant">#</code> are ignored.</p>
+                </div>
             </div>
             <div class="flex justify-end">
-                <button type="submit" class="inline-flex items-center gap-2 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
-                    <span class="material-symbols-outlined text-sm">upload_file</span> Upload & Import
+                <button type="submit" class="inline-flex items-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
+                    <span class="material-symbols-outlined text-sm">check</span> Upload & Import
                 </button>
             </div>
         </form>
@@ -62,4 +66,16 @@
         {% endif %}
     </div>
 </div>
+
+<script>
+(function () {
+    const input = document.getElementById('trusted-import-file');
+    const filename = document.getElementById('trusted-import-filename');
+    if (!input || !filename) return;
+    input.addEventListener('change', () => {
+        filename.textContent = input.files?.[0]?.name || 'No file chosen';
+        filename.classList.toggle('italic', !input.files?.[0]);
+    });
+})();
+</script>
 {% endblock %}

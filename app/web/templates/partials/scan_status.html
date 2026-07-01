@@ -1,0 +1,23 @@
+<div id="scan-status-panel" class="space-y-4">
+    {% if last_scan %}
+    <div class="flex items-start gap-3">
+        <span class="material-symbols-outlined text-outline text-sm mt-0.5">schedule</span>
+        <div>
+            <div class="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1">Last Scan</div>
+            <div class="font-mono text-sm flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>{{ last_scan.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+                <span class="text-on-surface-variant" data-relative-time="{{ last_scan.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}" data-relative-parens="true">{{ last_scan.created_at | relative_ago(parens=true) }}</span>
+            </div>
+        </div>
+    </div>
+    <div class="flex items-start gap-3">
+        <span class="material-symbols-outlined {% if last_scan.event_type == 'scan_failed' %}text-error{% else %}text-outline{% endif %} text-sm mt-0.5">info</span>
+        <div>
+            <div class="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1">Result Message</div>
+            <div class="text-sm {% if last_scan.event_type == 'scan_failed' %}text-error{% endif %}">{{ last_scan.message }}</div>
+        </div>
+    </div>
+    {% else %}
+    <p class="text-on-surface-variant italic">No scans have been run yet.</p>
+    {% endif %}
+</div>

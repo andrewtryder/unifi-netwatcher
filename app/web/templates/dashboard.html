@@ -23,18 +23,6 @@
             </div>
         </div>
 
-        <!-- Unknown Devices -->
-        <div class="glass-panel border-error/50 bg-error/5 p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
-            <div class="flex items-center justify-between z-10">
-                <span class="text-sm font-medium text-error">Unknown Devices</span>
-                <span class="material-symbols-outlined text-error animate-pulse">warning</span>
-            </div>
-            <div class="text-3xl font-bold text-error z-10">{{ stats.unknown }}</div>
-            <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:opacity-20 transition-opacity">
-                <span class="material-symbols-outlined text-8xl text-error">warning</span>
-            </div>
-        </div>
-
         <!-- Trusted Devices -->
         <div class="glass-panel border-secondary/30 bg-secondary/5 p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
             <div class="flex items-center justify-between z-10">
@@ -44,6 +32,18 @@
             <div class="text-3xl font-bold text-secondary z-10">{{ stats.trusted }}</div>
             <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:opacity-20 transition-opacity">
                 <span class="material-symbols-outlined text-8xl text-secondary">verified_user</span>
+            </div>
+        </div>
+
+        <!-- Unknown Devices -->
+        <div class="glass-panel border-error/50 bg-error/5 p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
+            <div class="flex items-center justify-between z-10">
+                <span class="text-sm font-medium text-error">Unknown Devices</span>
+                <span class="material-symbols-outlined text-error animate-pulse">warning</span>
+            </div>
+            <div class="text-3xl font-bold text-error z-10">{{ stats.unknown }}</div>
+            <div class="absolute -right-4 -bottom-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <span class="material-symbols-outlined text-8xl text-error">warning</span>
             </div>
         </div>
 
@@ -68,35 +68,65 @@
         </div>
 
         <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
-            <div class="space-y-4">
-                {% if last_scan %}
-                <div class="flex items-start gap-3">
-                    <span class="material-symbols-outlined text-outline text-sm mt-0.5">schedule</span>
-                    <div>
-                        <div class="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1">Last Scan</div>
-                        <div class="font-mono text-sm">{{ last_scan.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</div>
-                    </div>
-                </div>
-                <div class="flex items-start gap-3">
-                    <span class="material-symbols-outlined text-outline text-sm mt-0.5">info</span>
-                    <div>
-                        <div class="text-xs font-medium text-on-surface-variant uppercase tracking-wider mb-1">Result Message</div>
-                        <div class="text-sm">{{ last_scan.message }}</div>
-                    </div>
-                </div>
-                {% else %}
-                <p class="text-on-surface-variant italic">No scans have been run yet.</p>
-                {% endif %}
-            </div>
+            {% include "partials/scan_status.html" %}
 
-            <div class="flex-shrink-0">
-                <button hx-post="/api/scan/run" hx-swap="none" onclick="alert('Scan triggered in background')"
-                        class="w-full md:w-auto flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-6 py-3 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
+            <div class="flex-shrink-0 flex flex-col items-stretch md:items-end gap-2">
+                <p id="scan-feedback" class="hidden text-sm font-medium"></p>
+                <button id="scan-button"
+                        class="w-full md:w-auto flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-background font-medium px-6 py-3 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
                     <span class="material-symbols-outlined text-sm">sync</span>
-                    Trigger Manual Scan
+                    <span class="scan-label">Trigger Manual Scan</span>
                 </button>
             </div>
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    const btn = document.getElementById('scan-button');
+    if (!btn) return;
+
+    btn.addEventListener('click', async () => {
+        const label = btn.querySelector('.scan-label');
+        const feedback = document.getElementById('scan-feedback');
+        btn.disabled = true;
+        if (label) label.textContent = 'Scanning...';
+
+        try {
+            const response = await fetch('/api/scan/run', { method: 'POST' });
+            const res = await response.json();
+            const msg = res.success
+                ? `Scan complete: ${res.devices_processed} device(s) processed.`
+                : `Scan failed: ${res.message}`;
+            if (feedback) {
+                feedback.textContent = msg;
+                feedback.classList.remove('hidden', 'text-error', 'text-secondary');
+                feedback.classList.add(res.success ? 'text-secondary' : 'text-error');
+            }
+
+            const statusRes = await fetch('/htmx/scan-status');
+            if (statusRes.ok) {
+                const html = await statusRes.text();
+                const doc = new DOMParser().parseFromString(html, 'text/html');
+                const panel = doc.getElementById('scan-status-panel');
+                const current = document.getElementById('scan-status-panel');
+                if (panel && current) {
+                    current.replaceWith(panel);
+                    window.NetWatcher?.updateRelativeTimes();
+                }
+            }
+        } catch (_) {
+            if (feedback) {
+                feedback.textContent = 'Scan failed: request error.';
+                feedback.classList.remove('hidden', 'text-secondary');
+                feedback.classList.add('text-error');
+            }
+        } finally {
+            btn.disabled = false;
+            if (label) label.textContent = 'Trigger Manual Scan';
+        }
+    });
+})();
+</script>
 {% endblock %}

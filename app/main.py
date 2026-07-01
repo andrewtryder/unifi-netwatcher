@@ -14,8 +14,10 @@ from app.api.routes_notifications import router as notifications_router
 from app.api.routes_import_export import router as tools_router
 from app.web.routes import router as web_router
 from app.oui import update_oui_data
+from app.scanner import run_scan
 from app.db import SessionLocal
 from app.models import OuiEntry
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
@@ -28,6 +30,16 @@ async def scheduled_oui_update():
     finally:
         db.close()
 
+def scheduled_scan():
+    logger.info("Running scheduled scan...")
+    db = SessionLocal()
+    try:
+        run_scan(db)
+    except Exception:
+        logger.exception("Scheduled scan failed")
+    finally:
+        db.close()
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run alembic migrations on startup
@@ -36,6 +48,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize scheduler
     scheduler.add_job(scheduled_oui_update, 'interval', days=7)
+    scheduler.add_job(scheduled_scan, 'interval', seconds=settings.SCAN_INTERVAL_SECONDS)
     scheduler.start()
 
     # Check if OUI DB is empty and trigger immediate download if so

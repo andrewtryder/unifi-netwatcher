@@ -6,3 +6,6 @@ class RenameRequest(BaseModel):
 
 class NotesRequest(BaseModel):
     notes: str
+
+class BulkDeviceIdsRequest(BaseModel):
+    device_ids: list[int]

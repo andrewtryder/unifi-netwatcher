@@ -8,5 +8,5 @@ router = APIRouter()
 
 @router.post("/run")
 def trigger_scan(db: Session = Depends(get_db)):
-    run_scan(db)
-    return {"status": "scan complete"}
+    result = run_scan(db, source="manual")
+    return {"status": "scan complete", **result}

@@ -10,38 +10,11 @@
                 </a>
                 <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface flex items-center gap-3">
                     Device Details
-                    {% if device.status == 'trusted' %}
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20 tracking-normal">Trusted</span>
-                    {% elif device.status == 'ignored' %}
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline tracking-normal">Ignored</span>
-                    {% else %}
-                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20 tracking-normal animate-pulse">Unknown</span>
-                    {% endif %}
+                    {% include "partials/device_status_badge.html" %}
                 </h1>
             </div>
         </div>
-        <div class="flex items-center gap-3" id="device-actions">
-            {% if device.status != 'trusted' %}
-            <button hx-post="/api/devices/{{ device.mac }}/trust" hx-target="#device-actions" hx-swap="outerHTML"
-                    class="inline-flex items-center gap-1.5 bg-secondary/10 hover:bg-secondary/20 text-secondary border border-secondary/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
-                <span class="material-symbols-outlined text-[16px]">check</span> Trust Device
-            </button>
-            {% endif %}
-
-            {% if device.status != 'ignored' %}
-            <button hx-post="/api/devices/{{ device.mac }}/ignore" hx-target="#device-actions" hx-swap="outerHTML"
-                    class="inline-flex items-center gap-1.5 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline font-medium px-4 py-2 rounded-lg transition-colors text-sm">
-                <span class="material-symbols-outlined text-[16px]">visibility_off</span> Ignore Device
-            </button>
-            {% endif %}
-
-            {% if device.status != 'unknown' %}
-            <button hx-post="/api/devices/{{ device.mac }}/reset" hx-target="#device-actions" hx-swap="outerHTML"
-                    class="inline-flex items-center gap-1.5 text-error hover:bg-error/10 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
-                <span class="material-symbols-outlined text-[16px]">restart_alt</span> Reset Status
-            </button>
-            {% endif %}
-        </div>
+        {% include "partials/device_actions.html" %}
     </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -157,4 +130,67 @@
         </div>
     </div>
 </div>
+
+<script>
+(function () {
+    async function refreshDeviceFragments(deviceId) {
+        const [badgeRes, actionsRes] = await Promise.all([
+            fetch(`/htmx/devices/${deviceId}/status-badge`),
+            fetch(`/htmx/devices/${deviceId}/actions`),
+        ]);
+        if (badgeRes.ok) {
+            const doc = new DOMParser().parseFromString(await badgeRes.text(), 'text/html');
+            const next = doc.getElementById('device-status-badge');
+            const current = document.getElementById('device-status-badge');
+            if (next && current) current.replaceWith(next);
+        }
+        if (actionsRes.ok) {
+            const doc = new DOMParser().parseFromString(await actionsRes.text(), 'text/html');
+            const next = doc.getElementById('device-actions');
+            const current = document.getElementById('device-actions');
+            if (next && current) {
+                current.replaceWith(next);
+                bindDeviceActions();
+            }
+        }
+        window.NetWatcher?.refreshNav();
+    }
+
+    function bindDeviceActions() {
+        document.querySelectorAll('[data-device-action]').forEach((btn) => {
+            if (btn.dataset.bound === 'true') return;
+            btn.dataset.bound = 'true';
+            btn.addEventListener('click', async () => {
+                const action = btn.dataset.deviceAction;
+                const deviceId = btn.dataset.deviceId;
+                const deviceMac = btn.dataset.deviceMac;
+
+                if (action === 'delete') {
+                    const confirmed = confirm(
+                        `Permanently delete ${deviceMac}?\n\nThis removes the device and all its observations and history. It may reappear on a future scan if still on your network.`
+                    );
+                    if (!confirmed) return;
+                }
+
+                btn.disabled = true;
+                try {
+                    const response = await fetch(`/api/devices/${deviceId}/${action}`, { method: 'POST' });
+                    if (!response.ok) throw new Error('Request failed');
+                    if (action === 'delete') {
+                        window.location.href = '/devices';
+                        return;
+                    }
+                    await refreshDeviceFragments(deviceId);
+                } catch (e) {
+                    alert(action === 'delete' ? 'Failed to delete device.' : 'Failed to update device status.');
+                } finally {
+                    btn.disabled = false;
+                }
+            });
+        });
+    }
+
+    bindDeviceActions();
+})();
+</script>
 {% endblock %}

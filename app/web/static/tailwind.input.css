@@ -1,0 +1,122 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/static/fonts/inter-latin-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/static/fonts/inter-latin-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 600;
+  font-display: optional;
+  src: url("/static/fonts/inter-latin-600.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 700;
+  font-display: optional;
+  src: url("/static/fonts/inter-latin-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/static/fonts/jetbrains-mono-latin-400.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: optional;
+  src: url("/static/fonts/jetbrains-mono-latin-500.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: optional;
+  src: url("/static/fonts/jetbrains-mono-latin-700.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Material Symbols Outlined";
+  font-style: normal;
+  font-weight: 400;
+  font-display: optional;
+  src: url("/static/fonts/material-symbols-outlined.woff2") format("woff2");
+}
+
+.material-symbols-outlined {
+  font-family: "Material Symbols Outlined";
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer base {
+  body {
+    @apply bg-background text-on-surface;
+  }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-surface border border-outline;
+  }
+
+  .nav-link {
+    @apply text-on-surface-variant transition-colors duration-200;
+  }
+
+  .nav-link:hover {
+    @apply text-primary;
+  }
+
+  .field-help {
+    @apply relative inline-flex items-center;
+  }
+
+  .field-help-tip {
+    visibility: hidden;
+    opacity: 0;
+    @apply absolute left-1/2 -translate-x-1/2 w-max max-w-[240px] px-2.5 py-2 rounded-lg border border-outline text-on-surface text-xs font-normal normal-case tracking-normal shadow-lg z-[60] pointer-events-none transition-opacity duration-150;
+    bottom: calc(100% + 8px);
+    background: #2a3138;
+    font-family: Inter, system-ui, sans-serif;
+    line-height: 1.4;
+  }
+
+  .field-help:hover .field-help-tip,
+  .field-help:focus-within .field-help-tip {
+    visibility: visible;
+    opacity: 1;
+  }
+}

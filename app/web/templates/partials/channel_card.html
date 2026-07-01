@@ -1,0 +1,35 @@
+<div class="glass-panel rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4" id="channel-{{ channel.id }}">
+    <div class="flex items-start gap-4">
+        <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-surface-variant text-on-surface">
+            {% if channel.type == 'pushover' %}
+            <span class="material-symbols-outlined">smartphone</span>
+            {% elif channel.type == 'webhook' %}
+            <span class="material-symbols-outlined">webhook</span>
+            {% else %}
+            <span class="material-symbols-outlined">notifications</span>
+            {% endif %}
+        </div>
+        <div>
+            <h3 class="font-semibold text-lg flex items-center gap-2">
+                {{ channel.name }}
+                {% if channel.enabled %}
+                <span class="inline-flex w-2 h-2 rounded-full bg-secondary"></span>
+                {% else %}
+                <span class="inline-flex w-2 h-2 rounded-full bg-outline"></span>
+                {% endif %}
+            </h3>
+            <p class="text-sm text-on-surface-variant font-mono mt-1 uppercase">{{ channel.type }}</p>
+        </div>
+    </div>
+    <div class="flex items-center gap-3">
+        <button hx-post="/api/notifications/htmx/{{ channel.id }}/test" hx-target="#test-result-{{ channel.id }}" hx-swap="innerHTML"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline transition-colors text-sm font-medium">
+            <span class="material-symbols-outlined text-[16px]">send</span> Test
+        </button>
+        <span id="test-result-{{ channel.id }}" class="text-xs font-bold"></span>
+        <button hx-post="/api/notifications/htmx/{{ channel.id }}/delete" hx-target="#channel-{{ channel.id }}" hx-swap="outerHTML"
+                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium">
+            <span class="material-symbols-outlined text-[16px]">delete</span>
+        </button>
+    </div>
+</div>

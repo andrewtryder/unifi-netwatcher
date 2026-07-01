@@ -3,21 +3,21 @@ import io
 from datetime import datetime
 from fastapi import APIRouter, Depends, UploadFile, File, Request
 from fastapi.responses import PlainTextResponse, StreamingResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import Device
 from app.mac import normalize_mac
 from app.api.routes_devices import log_action
+from app.activity_log import record_event
+from app.web.context import template_context
+from app.web.templates_env import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/web/templates")
-templates.env.cache = None
 
-@router.get("/tools", response_class=HTMLResponse)
-def tools_page(request: Request):
-    return templates.TemplateResponse(request=request, name="tools.html", context={"request": request})
+@router.get("", response_class=HTMLResponse)
+def tools_page(request: Request, db: Session = Depends(get_db)):
+    return templates.TemplateResponse(request=request, name="tools.html", context=template_context(db, request))
 
 @router.post("/htmx/import_trusted")
 async def import_trusted(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -31,10 +31,19 @@ async def import_trusted(request: Request, file: UploadFile = File(...), db: Ses
         line = line.strip()
         if not line or line.startswith("#"):
             continue
-            
-        parts = line.split("#", 1)
-        raw_mac = parts[0].strip()
-        note = parts[1].strip() if len(parts) > 1 else ""
+
+        note = ""
+        if "," in line:
+            cols = [c.strip() for c in line.split(",", 1)]
+            raw_mac = cols[0]
+            note = cols[1] if len(cols) > 1 else ""
+        else:
+            parts = line.split("#", 1)
+            raw_mac = parts[0].strip()
+            note = parts[1].strip() if len(parts) > 1 else ""
+
+        if raw_mac.lower() in ("mac", "mac address"):
+            continue
         
         mac = normalize_mac(raw_mac)
         if not mac:
@@ -45,16 +54,17 @@ async def import_trusted(request: Request, file: UploadFile = File(...), db: Ses
             device = Device(mac=mac, status="trusted", first_seen_at=now, last_seen_at=now, display_name=note)
             db.add(device)
             db.flush()
-            log_action(db, device, "trust", {"source": "trusted.txt_import"})
+            log_action(db, device, "trust", {"source": "trusted.csv_import"})
             imported_count += 1
         else:
             if device.status != "trusted":
                 device.status = "trusted"
-                log_action(db, device, "trust", {"source": "trusted.txt_import"})
+                log_action(db, device, "trust", {"source": "trusted.csv_import"})
                 imported_count += 1
             if note and not device.display_name:
                 device.display_name = note
-                
+
+    record_event(db, "import_trusted", f"Imported or updated {imported_count} trusted devices from CSV")
     db.commit()
     return HTMLResponse(f"<div class='text-green-600 font-bold mt-4'>Imported or updated {imported_count} trusted devices.</div>")
 

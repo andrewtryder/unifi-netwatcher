@@ -1,5 +1,8 @@
 import os
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def get_env_bool(key: str, default: bool = False) -> bool:
     val = os.environ.get(key, "").lower()
@@ -17,7 +20,10 @@ class Settings:
     UNIFI_SITE: str = os.environ.get("UNIFI_SITE", "default")
     UNIFI_VERIFY_SSL: bool = get_env_bool("UNIFI_VERIFY_SSL", False)
     UNIFI_TIMEOUT_SECONDS: int = int(os.environ.get("UNIFI_TIMEOUT_SECONDS", "10"))
-    UNIFI_MOCK_MODE: bool = get_env_bool("UNIFI_MOCK_MODE", False)
+    UNIFI_MOCK_MODE: bool = get_env_bool(
+        "UNIFI_MOCK_MODE",
+        os.environ.get("UNIFI_URL", "https://unifi.example.local") == "https://unifi.example.local",
+    )
 
     # Scanner Settings
     SCAN_INTERVAL_SECONDS: int = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))

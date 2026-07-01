@@ -4,42 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NetWatcher for UniFi</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <!-- HTMX CDN -->
+    <link rel="preload" href="/static/fonts/inter-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/material-symbols-outlined.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="/static/app.css">
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet">
-    <script id="tailwind-config">
-        tailwind.config = {
-            darkMode: "class",
-            theme: {
-                extend: {
-                    colors: {
-                        background: "#0f1418",
-                        surface: "#1b2024",
-                        primary: "#38bdf8",
-                        secondary: "#10b981",
-                        error: "#f43f5e",
-                        warning: "#f59e0b",
-                        "on-surface": "#dee3e8",
-                        "on-surface-variant": "#bdc8d1",
-                        "outline": "#3e484f"
-                    },
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
-                    }
-                }
-            }
-        }
-    </script>
-    <style>
-        body { background-color: #0f1418; color: #dee3e8; }
-        .glass-panel { background-color: #1b2024; border: 1px solid #3e484f; }
-        .nav-link { color: #bdc8d1; transition: color 0.2s; }
-        .nav-link:hover { color: #38bdf8; }
-    </style>
+    <script src="/static/app.js" defer></script>
 </head>
 <body class="font-sans min-h-screen flex flex-col">
     <!-- Top Navigation -->
@@ -51,12 +20,8 @@
                 </div>
                 <a href="/" class="text-xl font-bold tracking-tight text-on-surface">NetWatcher</a>
             </div>
-            <div class="hidden md:flex space-x-8">
-                <a href="/" class="nav-link font-medium flex items-center gap-2"><span class="material-symbols-outlined text-sm">dashboard</span> Dashboard</a>
-                <a href="/unknown" class="nav-link font-medium flex items-center gap-2 text-error"><span class="material-symbols-outlined text-sm">warning</span> Unknown Devices</a>
-                <a href="/devices" class="nav-link font-medium flex items-center gap-2"><span class="material-symbols-outlined text-sm">inventory</span> Inventory</a>
-                <a href="/notifications" class="nav-link font-medium flex items-center gap-2"><span class="material-symbols-outlined text-sm">notifications</span> Alerts</a>
-                <a href="/tools" class="nav-link font-medium flex items-center gap-2"><span class="material-symbols-outlined text-sm">build</span> Tools</a>
+            <div id="desktop-nav-links" class="hidden md:flex space-x-8">
+                {% include "partials/nav_desktop_links.html" %}
             </div>
             <!-- Mobile Menu Button -->
             <div class="md:hidden">
@@ -72,24 +37,6 @@
         {% block content %}{% endblock %}
     </main>
 
-    <!-- Mobile Bottom Nav -->
-    <nav class="md:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-outline flex justify-around items-center h-16 z-50">
-        <a href="/" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary active:text-primary">
-            <span class="material-symbols-outlined text-2xl">dashboard</span>
-            <span class="text-[10px] font-medium mt-1">Dashboard</span>
-        </a>
-        <a href="/unknown" class="flex flex-col items-center justify-center w-full h-full text-error hover:text-error/80">
-            <span class="material-symbols-outlined text-2xl">warning</span>
-            <span class="text-[10px] font-medium mt-1">Unknown</span>
-        </a>
-        <a href="/devices" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary">
-            <span class="material-symbols-outlined text-2xl">inventory</span>
-            <span class="text-[10px] font-medium mt-1">Inventory</span>
-        </a>
-        <a href="/notifications" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary">
-            <span class="material-symbols-outlined text-2xl">notifications</span>
-            <span class="text-[10px] font-medium mt-1">Alerts</span>
-        </a>
-    </nav>
+    {% include "partials/nav_mobile.html" %}
 </body>
 </html>

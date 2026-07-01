@@ -2,6 +2,11 @@
 
 > A lightweight UniFi unknown-device monitor with WebUI, SQLite history, approval workflow, and pluggable alerts.
 
+I've wanted a lightweight monitor to routinely scan my home network for unknown devices. Normally
+WatchYourLan[https://github.com/aceberg/WatchYourLAN] and NetAlert X[https://netalertx.com/] are the most popular options, but these are 
+a bit heavy for my needs, and Ubiquiti offers a table via its administrative interface that can be scanned. I found
+Netwatcher[https://github.com/coolcat1575/netwatcher/] but this was unmaintained and I wanted a solution I could plug-into Docker or Proxmox easily to perform the same thing.
+
 This project monitors your network for unknown MAC addresses using data from a UniFi Controller / UniFi Network Server and provides configurable alerts (Pushover, Webhooks, etc.). It acts as a lightweight, single-container alternative to heavy monitoring stacks.
 
 ## Features
@@ -20,6 +25,7 @@ This project monitors your network for unknown MAC addresses using data from a U
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+npm install && npm run build:css
 cp .env.example .env
 uvicorn app.main:app --reload --port 8080
 ```

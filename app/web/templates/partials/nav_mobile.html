@@ -1,0 +1,25 @@
+<nav id="mobile-nav" class="md:hidden fixed bottom-0 left-0 right-0 glass-panel border-t border-outline flex justify-around items-center h-16 z-50">
+    <a href="/" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary active:text-primary">
+        <span class="material-symbols-outlined text-2xl">dashboard</span>
+        <span class="text-[10px] font-medium mt-1">Dashboard</span>
+    </a>
+    {% if unknown_count|default(0) > 0 %}
+    <a href="/unknown" class="flex flex-col items-center justify-center w-full h-full text-error hover:text-error/80 relative">
+        <span class="material-symbols-outlined text-2xl">warning</span>
+        <span class="text-[10px] font-medium mt-1">Unknown</span>
+        <span class="absolute top-1 right-[calc(50%-1.25rem)] min-w-[1rem] h-4 px-1 rounded-full bg-error text-background text-[10px] font-bold flex items-center justify-center">{{ unknown_count }}</span>
+    </a>
+    {% endif %}
+    <a href="/devices" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary">
+        <span class="material-symbols-outlined text-2xl">inventory</span>
+        <span class="text-[10px] font-medium mt-1">Inventory</span>
+    </a>
+    <a href="/notifications" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary">
+        <span class="material-symbols-outlined text-2xl">notifications</span>
+        <span class="text-[10px] font-medium mt-1">Alerts</span>
+    </a>
+    <a href="/logs" class="flex flex-col items-center justify-center w-full h-full text-on-surface-variant hover:text-primary">
+        <span class="material-symbols-outlined text-2xl">receipt_long</span>
+        <span class="text-[10px] font-medium mt-1">Logs</span>
+    </a>
+</nav>

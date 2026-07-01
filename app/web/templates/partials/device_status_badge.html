@@ -1,0 +1,11 @@
+<span id="device-status-badge"{% if oob %} hx-swap-oob="true"{% endif %}>
+{% if device.status == 'trusted' %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20 tracking-normal">Trusted</span>
+{% elif device.status == 'ignored' %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline tracking-normal">Ignored</span>
+{% elif device.status == 'blocked' %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20 tracking-normal">Blocked</span>
+{% else %}
+<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20 tracking-normal animate-pulse">Unknown</span>
+{% endif %}
+</span>

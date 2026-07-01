@@ -1,0 +1,26 @@
+<div class="flex items-center gap-3" id="device-actions"{% if oob %} hx-swap-oob="true"{% endif %}>
+    {% if device.status != 'trusted' %}
+    <button type="button" data-device-action="trust" data-device-id="{{ device.id }}"
+            class="inline-flex items-center gap-1.5 bg-secondary/10 hover:bg-secondary/20 text-secondary border border-secondary/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+        <span class="material-symbols-outlined text-[16px]">check</span> Trust Device
+    </button>
+    {% endif %}
+
+    {% if device.status != 'ignored' %}
+    <button type="button" data-device-action="ignore" data-device-id="{{ device.id }}"
+            class="inline-flex items-center gap-1.5 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+        <span class="material-symbols-outlined text-[16px]">visibility_off</span> Ignore Device
+    </button>
+    {% endif %}
+
+    {% if device.status != 'unknown' %}
+    <button type="button" data-device-action="reset" data-device-id="{{ device.id }}"
+            class="inline-flex items-center gap-1.5 text-error hover:bg-error/10 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+        <span class="material-symbols-outlined text-[16px]">restart_alt</span> Reset Status
+    </button>
+    {% endif %}
+    <button type="button" data-device-action="delete" data-device-id="{{ device.id }}" data-device-mac="{{ device.mac }}"
+            class="inline-flex items-center gap-1.5 bg-error hover:bg-error/90 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+        <span class="material-symbols-outlined text-[16px]">delete</span> Delete
+    </button>
+</div>

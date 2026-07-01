@@ -64,21 +64,25 @@ def check_and_send_alerts(db: Session, device: Device, now: datetime):
     else:
         db.add(Event(device_id=device.id, event_type="alert_failed", message="All alerts failed"))
 
-def run_scan(db: Session):
-    logger.info("Starting UniFi scan")
-    
-    scan_start_event = Event(event_type="scan_started", severity="info", message="Scan started")
+def run_scan(db: Session, source: str = "scheduled") -> dict:
+    logger.info("Starting UniFi scan (%s)", source)
+
+    scan_start_event = Event(event_type="scan_started", severity="info", message=f"Scan started ({source})")
     db.add(scan_start_event)
     db.commit()
 
     client = UnifiClient()
     clients_data = client.get_clients()
-    
+
     if not clients_data and not client.mock_mode:
-        scan_fail_event = Event(event_type="scan_failed", severity="error", message="Failed to fetch clients or zero clients returned")
+        message = (
+            "Failed to fetch clients from UniFi. "
+            "Check UNIFI_URL, credentials, and SSL settings, or set UNIFI_MOCK_MODE=true for testing."
+        )
+        scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
         db.add(scan_fail_event)
         db.commit()
-        return
+        return {"success": False, "message": message, "devices_processed": 0}
 
     now = datetime.utcnow()
     
@@ -130,6 +134,8 @@ def run_scan(db: Session):
         # Trigger alerts check
         check_and_send_alerts(db, device, now)
 
-    db.add(Event(event_type="scan_finished", severity="info", message=f"Scan finished. Processed {len(clients_data)} clients."))
+    message = f"Scan finished ({source}). Processed {len(clients_data)} clients."
+    db.add(Event(event_type="scan_finished", severity="info", message=message))
     db.commit()
     logger.info("Scan finished successfully")
+    return {"success": True, "message": message, "devices_processed": len(clients_data)}
