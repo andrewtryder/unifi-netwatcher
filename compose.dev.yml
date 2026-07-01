@@ -1,0 +1,12 @@
+services:
+  unifi-netwatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: unifi-netwatcher:dev
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      APP_ENV: development
+      UNIFI_MOCK_MODE: "true"
