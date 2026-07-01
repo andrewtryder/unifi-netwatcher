@@ -69,13 +69,8 @@ docker compose up -d
 2. **UI Authentication:** Local UI authentication is pending in a future release. **Do not expose this container directly to the public internet** without a reverse proxy providing authentication (e.g. Authelia, Authentik, or HTTP Basic Auth via NGINX/Traefik).
 3. **TLS Warning:** If `UNIFI_VERIFY_SSL` is `false`, MITM attacks against the controller API are theoretically possible. Use it only on trusted LANs.
 
-## Screenshots
+## Screenshot
 
-### Dashboard
-![Dashboard](docs/assets/dashboard.png)
-
-### Unknown Devices
-![Unknown Devices](docs/assets/unknown.png)
-
-### Inventory
-![Inventory](docs/assets/inventory.png)
+<p align="center">
+  <img src="docs/assets/screenshot.png" alt="NetWatcher dashboard showing device stats and scanner status" width="900">
+</p>
