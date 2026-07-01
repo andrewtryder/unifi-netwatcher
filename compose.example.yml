@@ -1,0 +1,22 @@
+services:
+  unifi-netwatcher:
+    image: ghcr.io/<owner>/unifi-netwatcher:latest
+    container_name: unifi-netwatcher
+    ports:
+      - "8080:8080"
+    environment:
+      APP_SECRET_KEY: "change-me"
+      DATABASE_URL: "sqlite:////app/data/netwatcher.db"
+      UNIFI_URL: "https://unifi.example.local"
+      UNIFI_USERNAME: "admin"
+      UNIFI_PASSWORD: "change-me"
+      UNIFI_SITE: "default"
+      UNIFI_VERIFY_SSL: "false"
+      SCAN_INTERVAL_SECONDS: "300"
+      ALERT_COOLDOWN_SECONDS: "21600"
+      BOOTSTRAP_ADMIN_USERNAME: "admin"
+      BOOTSTRAP_ADMIN_PASSWORD: "change-me"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped

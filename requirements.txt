@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+jinja2
+sqlalchemy
+alembic
+python-dotenv
+httpx
+apscheduler

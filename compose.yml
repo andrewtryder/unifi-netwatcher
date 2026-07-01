@@ -1,0 +1,12 @@
+services:
+  unifi-netwatcher:
+    build: .
+    container_name: unifi-netwatcher
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped
