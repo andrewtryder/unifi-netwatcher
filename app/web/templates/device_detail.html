@@ -35,6 +35,8 @@
     <div class="space-x-2">
         <button hx-post="/htmx/devices/{{ device.id }}/trust" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600" onclick="window.location.reload()">Mark Trusted</button>
         <button hx-post="/htmx/devices/{{ device.id }}/ignore" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" onclick="window.location.reload()">Mark Ignored</button>
+        <button hx-get="/api/devices/htmx/{{ device.id }}/block_modal" hx-target="body" hx-swap="beforeend" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Block Device (UniFi)</button>
+        <button hx-post="/api/devices/htmx/{{ device.id }}/unblock" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">Unblock</button>
     </div>
     
     <div class="mt-6">

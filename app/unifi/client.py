@@ -17,6 +17,7 @@ class UnifiClient:
         self.verify_ssl = settings.UNIFI_VERIFY_SSL
         self.timeout = settings.UNIFI_TIMEOUT_SECONDS
         self.mock_mode = settings.UNIFI_MOCK_MODE
+        self.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
         self.client = httpx.Client(verify=self.verify_ssl, timeout=self.timeout)
         self._logged_in = False
 
@@ -52,20 +53,40 @@ class UnifiClient:
             logger.info("UniFi Client running in MOCK MODE. Returning mock clients.")
             return self._get_mock_data()
 
-        if not self._logged_in:
-            if not self.login():
-                return []
+        if not self._logged_in and not self.login(): return []
 
         url = f"{self.base_url}/proxy/network/api/s/{self.site}/stat/sta"
         try:
             r = self.client.get(url)
             if r.status_code == 401:
-                # Token might have expired, try logging in again
-                if self.login():
-                     r = self.client.get(url)
+                if self.login(): r = self.client.get(url)
             r.raise_for_status()
-            data = r.json()
-            return data.get("data", [])
+            return r.json().get("data", [])
         except Exception as e:
-            logger.error(f"Failed to fetch clients from UniFi Controller: {e}")
+            logger.error(f"Failed to fetch clients: {e}")
             return []
+            
+    def _stamgr_cmd(self, cmd: str, mac: str) -> bool:
+        if self.mock_mode or self.dry_run_blocks:
+            logger.info(f"[DRY RUN/MOCK] Would execute {cmd} on {mac}")
+            return True
+            
+        if not self._logged_in and not self.login(): return False
+        
+        url = f"{self.base_url}/proxy/network/api/s/{self.site}/cmd/stamgr"
+        payload = {"cmd": cmd, "mac": mac}
+        try:
+            r = self.client.post(url, json=payload)
+            if r.status_code == 401:
+                if self.login(): r = self.client.post(url, json=payload)
+            r.raise_for_status()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to execute stamgr {cmd} on {mac}: {e}")
+            return False
+
+    def block_client(self, mac: str) -> bool:
+        return self._stamgr_cmd("block-sta", mac)
+        
+    def unblock_client(self, mac: str) -> bool:
+        return self._stamgr_cmd("unblock-sta", mac)

@@ -23,4 +23,6 @@ class Settings:
     SCAN_INTERVAL_SECONDS: int = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))
     ALERT_COOLDOWN_SECONDS: int = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "21600"))
 
+ 
+    UNIFI_DRY_RUN_BLOCKS: bool = get_env_bool("UNIFI_DRY_RUN_BLOCKS", True)
 settings = Settings()
