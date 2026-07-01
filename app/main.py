@@ -4,6 +4,8 @@ from fastapi.staticfiles import StaticFiles
 import alembic.command
 import alembic.config
 
+from app.api.routes_scans import router as scans_router
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run alembic migrations on startup
@@ -17,6 +19,9 @@ app = FastAPI(title="NetWatcher for UniFi", lifespan=lifespan)
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 
+# Include routers
+app.include_router(scans_router, prefix="/api/scan", tags=["scans"])
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
@@ -29,4 +34,3 @@ def readyz():
 @app.get("/")
 def index():
     return {"message": "NetWatcher is running. API is ready."}
-
