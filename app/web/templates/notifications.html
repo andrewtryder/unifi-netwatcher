@@ -1,51 +1,100 @@
 {% extends "base.html" %}
 {% block content %}
-<h1 class="text-3xl font-bold mb-6">Notification Channels</h1>
-
-<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-    <div>
-        <h2 class="text-xl font-bold mb-4">Configured Channels</h2>
-        {% if channels %}
-            <ul class="space-y-4">
-            {% for channel in channels %}
-                <li class="bg-white border rounded p-4 shadow-sm" id="channel-{{ channel.id }}">
-                    <div class="flex justify-between items-center mb-2">
-                        <h3 class="font-bold">{{ channel.name }} <span class="text-gray-500 text-sm font-normal uppercase ml-2 px-2 py-0.5 bg-gray-100 rounded">{{ channel.type }}</span></h3>
-                        <div class="flex items-center">
-                            <button hx-post="/api/notifications/htmx/{{ channel.id }}/test" hx-target="next span" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded text-xs mr-2">Test</button>
-                            <span></span>
-                            <button hx-post="/api/notifications/htmx/{{ channel.id }}/delete" hx-target="#channel-{{ channel.id }}" hx-swap="outerHTML" class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600 ml-4">Delete</button>
-                        </div>
-                    </div>
-                    <pre class="text-xs text-gray-500 bg-gray-50 p-2 rounded overflow-x-auto">{{ channel.config_json }}</pre>
-                </li>
-            {% endfor %}
-            </ul>
-        {% else %}
-            <p class="text-gray-500">No notification channels configured.</p>
-        {% endif %}
+<div class="flex flex-col gap-6 max-w-4xl mx-auto pb-16 md:pb-0">
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface">Alert Channels</h1>
+        <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+                class="flex items-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+            <span class="material-symbols-outlined text-sm">add</span> New Channel
+        </button>
     </div>
-    
-    <div>
-        <h2 class="text-xl font-bold mb-4">Add New Channel</h2>
-        <form hx-post="/api/notifications/htmx/create" class="bg-white border p-6 rounded shadow-sm space-y-4">
-            <div>
-                <label class="block text-sm font-bold text-gray-700">Name</label>
-                <input type="text" name="name" required class="mt-1 w-full border rounded px-3 py-2" placeholder="e.g. My Pushover">
+
+    <!-- Active Channels List -->
+    <div class="flex flex-col gap-4" id="channels-list">
+        {% for channel in channels %}
+        <div class="glass-panel rounded-xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4" id="channel-{{ channel.id }}">
+            <div class="flex items-start gap-4">
+                <div class="flex items-center justify-center w-10 h-10 rounded-lg bg-surface-variant text-on-surface">
+                    {% if channel.type == 'pushover' %}
+                    <span class="material-symbols-outlined">smartphone</span>
+                    {% elif channel.type == 'webhook' %}
+                    <span class="material-symbols-outlined">webhook</span>
+                    {% else %}
+                    <span class="material-symbols-outlined">notifications</span>
+                    {% endif %}
+                </div>
+                <div>
+                    <h3 class="font-semibold text-lg flex items-center gap-2">
+                        {{ channel.name }}
+                        {% if channel.enabled %}
+                        <span class="inline-flex w-2 h-2 rounded-full bg-secondary"></span>
+                        {% else %}
+                        <span class="inline-flex w-2 h-2 rounded-full bg-outline"></span>
+                        {% endif %}
+                    </h3>
+                    <p class="text-sm text-on-surface-variant font-mono mt-1 uppercase">{{ channel.type }}</p>
+                </div>
             </div>
-            <div>
-                <label class="block text-sm font-bold text-gray-700">Type</label>
-                <select name="type" class="mt-1 w-full border rounded px-3 py-2">
-                    <option value="pushover">Pushover</option>
-                    <option value="webhook">Generic Webhook</option>
-                </select>
+            <div class="flex items-center gap-3">
+                <button hx-post="/api/notifications/test/{{ channel.id }}" hx-swap="none" onclick="alert('Test message queued')"
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline transition-colors text-sm font-medium">
+                    <span class="material-symbols-outlined text-[16px]">send</span> Test
+                </button>
+                <button hx-delete="/api/notifications/{{ channel.id }}" hx-target="#channel-{{ channel.id }}" hx-swap="outerHTML"
+                        class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-error hover:bg-error/10 transition-colors text-sm font-medium">
+                    <span class="material-symbols-outlined text-[16px]">delete</span>
+                </button>
             </div>
-            <div>
-                <label class="block text-sm font-bold text-gray-700">Config JSON</label>
-                <textarea name="config_json" required rows="5" class="mt-1 w-full border rounded px-3 py-2 font-mono text-sm" placeholder='{"token": "...", "user": "..."}'></textarea>
+        </div>
+        {% else %}
+        <div class="glass-panel rounded-xl p-8 text-center border-dashed">
+            <span class="material-symbols-outlined text-4xl text-outline mb-3">notifications_off</span>
+            <h3 class="text-lg font-medium text-on-surface mb-1">No alert channels configured</h3>
+            <p class="text-sm text-on-surface-variant mb-4">You won't receive notifications for unknown devices.</p>
+            <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+                    class="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium text-sm">
+                <span class="material-symbols-outlined text-sm">add</span> Add your first channel
+            </button>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Create Modal (Hidden by default) -->
+    <div id="create-modal" class="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-md rounded-xl shadow-2xl overflow-hidden border border-outline">
+            <div class="flex items-center justify-between p-4 border-b border-outline bg-surface-variant/30">
+                <h3 class="font-semibold text-lg text-on-surface">Create Notification Channel</h3>
+                <button onclick="document.getElementById('create-modal').classList.add('hidden')" class="text-outline hover:text-on-surface transition-colors">
+                    <span class="material-symbols-outlined">close</span>
+                </button>
             </div>
-            <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700">Save Channel</button>
-        </form>
+            <form hx-post="/htmx/create" hx-target="#channels-list" hx-swap="beforeend" onsubmit="document.getElementById('create-modal').classList.add('hidden')" class="p-6 flex flex-col gap-4">
+
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Type</label>
+                    <select name="type" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5">
+                        <option value="pushover">Pushover</option>
+                        <option value="webhook">Webhook</option>
+                    </select>
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Name</label>
+                    <input type="text" name="name" required class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5" placeholder="e.g. My Phone">
+                </div>
+
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Config JSON</label>
+                    <textarea name="config_json" rows="4" required class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 font-mono" placeholder='{"user_key": "...", "api_token": "..."}'></textarea>
+                    <p class="text-xs text-outline mt-1">Provide valid JSON configuration for the chosen provider.</p>
+                </div>
+
+                <div class="flex justify-end gap-3 mt-4">
+                    <button type="button" onclick="document.getElementById('create-modal').classList.add('hidden')" class="px-4 py-2 rounded-lg text-sm font-medium text-on-surface hover:bg-surface-variant transition-colors">Cancel</button>
+                    <button type="submit" class="bg-primary hover:bg-primary/90 text-background font-medium px-4 py-2 rounded-lg transition-colors text-sm">Create Channel</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 {% endblock %}

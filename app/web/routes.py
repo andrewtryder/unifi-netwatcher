@@ -10,6 +10,7 @@ from app.api.routes_devices import log_action
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
+templates.env.cache = None  # Disable Jinja caching to avoid unhashable dict errors in tests
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
@@ -20,7 +21,7 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
     
     last_scan = db.query(Event).filter(Event.event_type == "scan_finished").order_by(Event.created_at.desc()).first()
     
-    return templates.TemplateResponse("dashboard.html", {
+    return templates.TemplateResponse(request=request, name="dashboard.html", context={
         "request": request,
         "stats": {
             "total": total,
@@ -34,19 +35,19 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 @router.get("/unknown", response_class=HTMLResponse)
 def unknown_devices(request: Request, db: Session = Depends(get_db)):
     devices = db.query(Device).filter(Device.status == "unknown").order_by(Device.last_seen_at.desc()).all()
-    return templates.TemplateResponse("unknown.html", {"request": request, "devices": devices})
+    return templates.TemplateResponse(request=request, name="unknown.html", context={"request": request, "devices": devices})
 
 @router.get("/devices", response_class=HTMLResponse)
 def device_inventory(request: Request, db: Session = Depends(get_db)):
     devices = db.query(Device).order_by(Device.last_seen_at.desc()).all()
-    return templates.TemplateResponse("devices.html", {"request": request, "devices": devices})
+    return templates.TemplateResponse(request=request, name="devices.html", context={"request": request, "devices": devices})
 
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
 def device_detail(request: Request, device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         return HTMLResponse("Not Found", status_code=404)
-    return templates.TemplateResponse("device_detail.html", {"request": request, "device": device})
+    return templates.TemplateResponse(request=request, name="device_detail.html", context={"request": request, "device": device})
 
 # HTMX actions for simple server-rendered flows
 @router.post("/htmx/devices/{device_id}/trust")
@@ -84,4 +85,4 @@ from app.models import NotificationChannel
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications_page(request: Request, db: Session = Depends(get_db)):
     channels = db.query(NotificationChannel).all()
-    return templates.TemplateResponse("notifications.html", {"request": request, "channels": channels})
+    return templates.TemplateResponse(request=request, name="notifications.html", context={"request": request, "channels": channels})

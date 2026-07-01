@@ -1,51 +1,160 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="mb-4">
-    <a href="/devices" class="text-blue-600 hover:underline">&larr; Back to Inventory</a>
-</div>
-
-<div class="bg-white border rounded shadow-sm p-6 mb-6">
-    <div class="flex justify-between items-start mb-4">
+<div class="flex flex-col gap-6 max-w-[1440px] mx-auto pb-16 md:pb-0">
+    <!-- Header Area -->
+    <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-            <h1 class="text-3xl font-bold">{{ device.display_name or device.hostname or 'Unknown Device' }}</h1>
-            <p class="text-gray-500 font-mono mt-1">{{ device.mac }}</p>
+            <div class="flex items-center gap-3">
+                <a href="/devices" class="text-on-surface-variant hover:text-primary transition-colors flex items-center justify-center p-1 rounded-lg hover:bg-surface-variant/50">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                </a>
+                <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface flex items-center gap-3">
+                    Device Details
+                    {% if device.status == 'trusted' %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20 tracking-normal">Trusted</span>
+                    {% elif device.status == 'ignored' %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline tracking-normal">Ignored</span>
+                    {% else %}
+                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20 tracking-normal animate-pulse">Unknown</span>
+                    {% endif %}
+                </h1>
+            </div>
         </div>
-        <div>
-            <span class="px-3 py-1 rounded text-sm font-bold uppercase
-                {% if device.status == 'trusted' %}bg-green-100 text-green-800
-                {% elif device.status == 'ignored' %}bg-gray-200 text-gray-800
-                {% else %}bg-red-100 text-red-800{% endif %}">
-                {{ device.status }}
-            </span>
+        <div class="flex items-center gap-3" id="device-actions">
+            {% if device.status != 'trusted' %}
+            <button hx-post="/api/devices/{{ device.mac }}/trust" hx-target="#device-actions" hx-swap="outerHTML"
+                    class="inline-flex items-center gap-1.5 bg-secondary/10 hover:bg-secondary/20 text-secondary border border-secondary/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+                <span class="material-symbols-outlined text-[16px]">check</span> Trust Device
+            </button>
+            {% endif %}
+
+            {% if device.status != 'ignored' %}
+            <button hx-post="/api/devices/{{ device.mac }}/ignore" hx-target="#device-actions" hx-swap="outerHTML"
+                    class="inline-flex items-center gap-1.5 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+                <span class="material-symbols-outlined text-[16px]">visibility_off</span> Ignore Device
+            </button>
+            {% endif %}
+
+            {% if device.status != 'unknown' %}
+            <button hx-post="/api/devices/{{ device.mac }}/reset" hx-target="#device-actions" hx-swap="outerHTML"
+                    class="inline-flex items-center gap-1.5 text-error hover:bg-error/10 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+                <span class="material-symbols-outlined text-[16px]">restart_alt</span> Reset Status
+            </button>
+            {% endif %}
         </div>
     </div>
-    
-    <div class="grid grid-cols-2 gap-4 text-sm mt-6">
-        <div><span class="font-bold text-gray-600">IP Address:</span> {{ device.ip }}</div>
-        <div><span class="font-bold text-gray-600">Vendor:</span> {{ device.vendor }}</div>
-        <div><span class="font-bold text-gray-600">First Seen:</span> {{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else 'N/A' }}</div>
-        <div><span class="font-bold text-gray-600">Last Seen:</span> {{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else 'N/A' }}</div>
-        <div><span class="font-bold text-gray-600">SSID:</span> {{ device.last_ssid }}</div>
-        <div><span class="font-bold text-gray-600">AP MAC:</span> <span class="font-mono">{{ device.last_ap_mac }}</span></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Main Info Panel -->
+        <div class="lg:col-span-2 flex flex-col gap-6">
+            <div class="glass-panel rounded-xl p-6">
+                <h2 class="text-lg font-semibold flex items-center gap-2 mb-6 text-on-surface border-b border-outline pb-3">
+                    <span class="material-symbols-outlined text-primary">info</span> Core Information
+                </h2>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">MAC Address</span>
+                        <span class="font-mono text-lg text-primary">{{ device.mac }}</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">IP Address</span>
+                        <span class="font-mono text-lg">{{ device.ip or 'N/A' }}</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Hostname</span>
+                        <span class="text-lg">{{ device.hostname or 'N/A' }}</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Vendor</span>
+                        <span class="text-lg">{{ device.vendor or 'N/A' }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Observations History -->
+            <div class="glass-panel rounded-xl p-6">
+                <h2 class="text-lg font-semibold flex items-center gap-2 mb-6 text-on-surface border-b border-outline pb-3">
+                    <span class="material-symbols-outlined text-primary">history</span> Recent Observations
+                </h2>
+
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left">
+                        <thead>
+                            <tr class="text-xs font-medium text-on-surface-variant uppercase tracking-wider border-b border-outline">
+                                <th class="pb-3 pr-4">Time</th>
+                                <th class="pb-3 pr-4">IP</th>
+                                <th class="pb-3 pr-4">Hostname</th>
+                                <th class="pb-3">AP MAC</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-outline/50">
+                            {% for obs in observations %}
+                            <tr class="hover:bg-surface-variant/10 transition-colors">
+                                <td class="py-3 pr-4 font-mono text-sm text-on-surface-variant">{{ obs.seen_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                                <td class="py-3 pr-4 font-mono text-sm">{{ obs.ip or '-' }}</td>
+                                <td class="py-3 pr-4 text-sm">{{ obs.hostname or '-' }}</td>
+                                <td class="py-3 font-mono text-sm text-on-surface-variant">{{ obs.ap_mac or '-' }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="4" class="py-6 text-center text-on-surface-variant italic">No observations recorded yet.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Sidebar -->
+        <div class="flex flex-col gap-6">
+            <!-- Network Location -->
+            <div class="glass-panel rounded-xl p-6">
+                <h2 class="text-lg font-semibold flex items-center gap-2 mb-6 text-on-surface border-b border-outline pb-3">
+                    <span class="material-symbols-outlined text-primary">router</span> Network Location
+                </h2>
+
+                <div class="flex flex-col gap-4">
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Last Site</span>
+                        <span class="text-sm bg-surface-variant/50 px-3 py-2 rounded border border-outline">{{ device.last_site or 'N/A' }}</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Last SSID</span>
+                        <span class="text-sm bg-surface-variant/50 px-3 py-2 rounded border border-outline">{{ device.last_ssid or 'N/A' }}</span>
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Last AP MAC</span>
+                        <span class="font-mono text-sm bg-surface-variant/50 px-3 py-2 rounded border border-outline">{{ device.last_ap_mac or 'N/A' }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Timestamps -->
+            <div class="glass-panel rounded-xl p-6">
+                <h2 class="text-lg font-semibold flex items-center gap-2 mb-6 text-on-surface border-b border-outline pb-3">
+                    <span class="material-symbols-outlined text-primary">schedule</span> Timeline
+                </h2>
+
+                <div class="flex flex-col gap-4 relative before:absolute before:inset-y-0 before:left-2.5 before:w-px before:bg-outline">
+                    <div class="flex items-start gap-3 relative">
+                        <div class="w-5 h-5 rounded-full bg-surface border-2 border-primary flex-shrink-0 z-10 mt-0.5"></div>
+                        <div class="flex flex-col gap-0.5">
+                            <span class="text-sm font-medium text-on-surface">Last Seen</span>
+                            <span class="font-mono text-xs text-on-surface-variant">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') if device.last_seen_at else 'Never' }}</span>
+                        </div>
+                    </div>
+                    <div class="flex items-start gap-3 relative">
+                        <div class="w-5 h-5 rounded-full bg-surface border-2 border-outline flex-shrink-0 z-10 mt-0.5"></div>
+                        <div class="flex flex-col gap-0.5">
+                            <span class="text-sm font-medium text-on-surface">First Discovered</span>
+                            <span class="font-mono text-xs text-on-surface-variant">{{ device.first_seen_at.strftime('%Y-%m-%d %H:%M:%S UTC') if device.first_seen_at else 'Never' }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
-
-<div class="bg-white border rounded shadow-sm p-6 mb-6">
-    <h2 class="text-xl font-bold mb-4">Quick Actions</h2>
-    <div class="space-x-2">
-        <button hx-post="/htmx/devices/{{ device.id }}/trust" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600" onclick="window.location.reload()">Mark Trusted</button>
-        <button hx-post="/htmx/devices/{{ device.id }}/ignore" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" onclick="window.location.reload()">Mark Ignored</button>
-        <button hx-get="/api/devices/htmx/{{ device.id }}/block_modal" hx-target="body" hx-swap="beforeend" class="bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700">Block Device (UniFi)</button>
-        <button hx-post="/api/devices/htmx/{{ device.id }}/unblock" class="bg-yellow-600 text-white px-4 py-2 rounded hover:bg-yellow-700">Unblock</button>
-    </div>
-    
-    <div class="mt-6">
-        <h3 class="font-bold text-gray-700 mb-2">Rename Device</h3>
-        <form hx-post="/htmx/devices/{{ device.id }}/rename" class="flex space-x-2" onsubmit="setTimeout(()=>window.location.reload(), 200)">
-            <input type="text" name="display_name" value="{{ device.display_name or '' }}" class="border rounded px-3 py-2 w-64" placeholder="Friendly Name">
-            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
-        </form>
-    </div>
-</div>
-
 {% endblock %}
