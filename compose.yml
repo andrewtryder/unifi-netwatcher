@@ -1,6 +1,6 @@
 services:
   unifi-netwatcher:
-    build: .
+    image: ghcr.io/andrewtryder/unifi-netwatcher:latest
     container_name: unifi-netwatcher
     ports:
       - "8080:8080"
