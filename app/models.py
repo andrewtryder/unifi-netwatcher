@@ -102,3 +102,10 @@ class AuditLog(Base):
     details_json = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
 
+
+class OuiEntry(Base):
+    __tablename__ = "oui_entries"
+
+    mac_prefix = Column(String, primary_key=True, index=True)
+    vendor = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)

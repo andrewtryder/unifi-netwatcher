@@ -3,7 +3,7 @@ import logging
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 
-from app.models import Device, Observation, Event, NotificationChannel, NotificationDelivery
+from app.models import Device, Observation, Event, NotificationChannel, NotificationDelivery, OuiEntry
 from app.unifi.client import UnifiClient
 from app.mac import normalize_mac
 from app.config import settings
@@ -89,7 +89,18 @@ def run_scan(db: Session):
             
         ip = c.get("ip")
         hostname = c.get("hostname")
-        vendor = c.get("oui")
+
+        # Look up vendor in local OUI DB first, fallback to UniFi
+        vendor = None
+        if len(mac) >= 8:
+            mac_prefix = mac[:8]
+            oui_entry = db.query(OuiEntry).filter(OuiEntry.mac_prefix == mac_prefix).first()
+            if oui_entry:
+                vendor = oui_entry.vendor
+
+        if not vendor:
+            vendor = c.get("oui")
+
         site = c.get("site_id")
         ssid = c.get("essid")
         ap_mac = normalize_mac(c.get("ap_mac", ""))
