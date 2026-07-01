@@ -25,3 +25,4 @@ data/*.sqlite
 data/*.sqlite3
 logs/*
 !data/.gitkeep
+node_modules/
