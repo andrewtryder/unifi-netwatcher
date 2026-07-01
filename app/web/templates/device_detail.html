@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="mb-4">
+    <a href="/devices" class="text-blue-600 hover:underline">&larr; Back to Inventory</a>
+</div>
+
+<div class="bg-white border rounded shadow-sm p-6 mb-6">
+    <div class="flex justify-between items-start mb-4">
+        <div>
+            <h1 class="text-3xl font-bold">{{ device.display_name or device.hostname or 'Unknown Device' }}</h1>
+            <p class="text-gray-500 font-mono mt-1">{{ device.mac }}</p>
+        </div>
+        <div>
+            <span class="px-3 py-1 rounded text-sm font-bold uppercase
+                {% if device.status == 'trusted' %}bg-green-100 text-green-800
+                {% elif device.status == 'ignored' %}bg-gray-200 text-gray-800
+                {% else %}bg-red-100 text-red-800{% endif %}">
+                {{ device.status }}
+            </span>
+        </div>
+    </div>
+    
+    <div class="grid grid-cols-2 gap-4 text-sm mt-6">
+        <div><span class="font-bold text-gray-600">IP Address:</span> {{ device.ip }}</div>
+        <div><span class="font-bold text-gray-600">Vendor:</span> {{ device.vendor }}</div>
+        <div><span class="font-bold text-gray-600">First Seen:</span> {{ device.first_seen_at.strftime('%Y-%m-%d %H:%M') if device.first_seen_at else 'N/A' }}</div>
+        <div><span class="font-bold text-gray-600">Last Seen:</span> {{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else 'N/A' }}</div>
+        <div><span class="font-bold text-gray-600">SSID:</span> {{ device.last_ssid }}</div>
+        <div><span class="font-bold text-gray-600">AP MAC:</span> <span class="font-mono">{{ device.last_ap_mac }}</span></div>
+    </div>
+</div>
+
+<div class="bg-white border rounded shadow-sm p-6 mb-6">
+    <h2 class="text-xl font-bold mb-4">Quick Actions</h2>
+    <div class="space-x-2">
+        <button hx-post="/htmx/devices/{{ device.id }}/trust" class="bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600" onclick="window.location.reload()">Mark Trusted</button>
+        <button hx-post="/htmx/devices/{{ device.id }}/ignore" class="bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600" onclick="window.location.reload()">Mark Ignored</button>
+    </div>
+    
+    <div class="mt-6">
+        <h3 class="font-bold text-gray-700 mb-2">Rename Device</h3>
+        <form hx-post="/htmx/devices/{{ device.id }}/rename" class="flex space-x-2" onsubmit="setTimeout(()=>window.location.reload(), 200)">
+            <input type="text" name="display_name" value="{{ device.display_name or '' }}" class="border rounded px-3 py-2 w-64" placeholder="Friendly Name">
+            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Save</button>
+        </form>
+    </div>
+</div>
+
+{% endblock %}

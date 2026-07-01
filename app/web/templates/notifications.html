@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-3xl font-bold mb-6">Notification Channels</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+    <div>
+        <h2 class="text-xl font-bold mb-4">Configured Channels</h2>
+        {% if channels %}
+            <ul class="space-y-4">
+            {% for channel in channels %}
+                <li class="bg-white border rounded p-4 shadow-sm" id="channel-{{ channel.id }}">
+                    <div class="flex justify-between items-center mb-2">
+                        <h3 class="font-bold">{{ channel.name }} <span class="text-gray-500 text-sm font-normal uppercase ml-2 px-2 py-0.5 bg-gray-100 rounded">{{ channel.type }}</span></h3>
+                        <div class="flex items-center">
+                            <button hx-post="/api/notifications/htmx/{{ channel.id }}/test" hx-target="next span" class="bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-1 rounded text-xs mr-2">Test</button>
+                            <span></span>
+                            <button hx-post="/api/notifications/htmx/{{ channel.id }}/delete" hx-target="#channel-{{ channel.id }}" hx-swap="outerHTML" class="bg-red-500 text-white px-2 py-1 rounded text-xs hover:bg-red-600 ml-4">Delete</button>
+                        </div>
+                    </div>
+                    <pre class="text-xs text-gray-500 bg-gray-50 p-2 rounded overflow-x-auto">{{ channel.config_json }}</pre>
+                </li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p class="text-gray-500">No notification channels configured.</p>
+        {% endif %}
+    </div>
+    
+    <div>
+        <h2 class="text-xl font-bold mb-4">Add New Channel</h2>
+        <form hx-post="/api/notifications/htmx/create" class="bg-white border p-6 rounded shadow-sm space-y-4">
+            <div>
+                <label class="block text-sm font-bold text-gray-700">Name</label>
+                <input type="text" name="name" required class="mt-1 w-full border rounded px-3 py-2" placeholder="e.g. My Pushover">
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700">Type</label>
+                <select name="type" class="mt-1 w-full border rounded px-3 py-2">
+                    <option value="pushover">Pushover</option>
+                    <option value="webhook">Generic Webhook</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-sm font-bold text-gray-700">Config JSON</label>
+                <textarea name="config_json" required rows="5" class="mt-1 w-full border rounded px-3 py-2 font-mono text-sm" placeholder='{"token": "...", "user": "..."}'></textarea>
+            </div>
+            <button type="submit" class="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700">Save Channel</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block content %}
+<h1 class="text-3xl font-bold mb-6">Dashboard</h1>
+
+<div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+    <div class="bg-white border p-6 rounded shadow-sm text-center">
+        <h2 class="text-gray-500 font-semibold">Total Devices</h2>
+        <p class="text-4xl font-bold mt-2">{{ stats.total }}</p>
+    </div>
+    <div class="bg-red-50 border border-red-200 p-6 rounded shadow-sm text-center">
+        <h2 class="text-red-600 font-semibold">Unknown Devices</h2>
+        <p class="text-4xl font-bold mt-2 text-red-700">{{ stats.unknown }}</p>
+    </div>
+    <div class="bg-green-50 border border-green-200 p-6 rounded shadow-sm text-center">
+        <h2 class="text-green-600 font-semibold">Trusted Devices</h2>
+        <p class="text-4xl font-bold mt-2 text-green-700">{{ stats.trusted }}</p>
+    </div>
+    <div class="bg-gray-50 border p-6 rounded shadow-sm text-center">
+        <h2 class="text-gray-500 font-semibold">Ignored Devices</h2>
+        <p class="text-4xl font-bold mt-2 text-gray-700">{{ stats.ignored }}</p>
+    </div>
+</div>
+
+<div class="bg-white border rounded p-6 shadow-sm">
+    <h2 class="text-xl font-bold mb-4">Scanner Status</h2>
+    {% if last_scan %}
+        <p><span class="font-semibold text-gray-700">Last Scan:</span> {{ last_scan.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</p>
+        <p><span class="font-semibold text-gray-700">Result:</span> {{ last_scan.message }}</p>
+    {% else %}
+        <p class="text-gray-500">No scans have been run yet.</p>
+    {% endif %}
+    
+    <button hx-post="/api/scan/run" hx-swap="none" class="mt-4 bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700" onclick="alert('Scan triggered in background')">
+        Trigger Manual Scan
+    </button>
+</div>
+{% endblock %}
