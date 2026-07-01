@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NetWatcher for UniFi</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
     <link rel="preload" href="/static/fonts/inter-latin-400.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/static/fonts/material-symbols-outlined.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="/static/app.css">
@@ -15,10 +17,10 @@
     <nav class="glass-panel sticky top-0 z-50 shadow-md">
         <div class="max-w-[1440px] mx-auto px-4 lg:px-6 h-16 flex items-center justify-between">
             <div class="flex items-center gap-4">
-                <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-primary/10 text-primary">
-                    <span class="material-symbols-outlined text-xl">router</span>
-                </div>
-                <a href="/" class="text-xl font-bold tracking-tight text-on-surface">NetWatcher</a>
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/static/favicon.png" alt="" width="32" height="32" class="rounded-lg">
+                    <span class="text-xl font-bold tracking-tight text-on-surface">NetWatcher</span>
+                </a>
             </div>
             <div id="desktop-nav-links" class="hidden md:flex space-x-8">
                 {% include "partials/nav_desktop_links.html" %}

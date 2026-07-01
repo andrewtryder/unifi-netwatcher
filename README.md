@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/netwatcher.png" alt="NetWatcher logo" width="160">
+</p>
+
 # NetWatcher for UniFi
 
 > A lightweight UniFi unknown-device monitor with WebUI, SQLite history, approval workflow, and pluggable alerts.
