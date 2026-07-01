@@ -13,10 +13,11 @@ from app.api.routes_devices import log_action
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/web/templates")
+templates.env.cache = None
 
 @router.get("/tools", response_class=HTMLResponse)
 def tools_page(request: Request):
-    return templates.TemplateResponse("tools.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="tools.html", context={"request": request})
 
 @router.post("/htmx/import_trusted")
 async def import_trusted(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
