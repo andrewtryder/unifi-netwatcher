@@ -56,7 +56,32 @@ CI also builds the Docker image and runs `actionlint` / `zizmor` on workflows.
 
 ## Releases
 
-Merging conventional commits to `main` updates a Release Please PR. Merging that Release PR cuts a GitHub Release and publishes container images to GHCR and Docker Hub.
+Merging conventional commits to `main` updates a Release Please PR. Merging that Release PR cuts a GitHub Release and publishes multi-arch container images (`linux/amd64`, `linux/arm64`) to GHCR and Docker Hub.
+
+### Publish images without a version bump
+
+To rebuild and push `latest` (plus a short SHA tag) from `main` without cutting a Release Please version:
+
+```bash
+gh workflow run Release
+```
+
+Or: GitHub → Actions → Release → Run workflow.
+
+### Rebuild locally (Apple Silicon / arm64)
+
+```bash
+docker compose down
+docker compose -f compose.yml -f compose.dev.yml build --no-cache
+docker compose -f compose.yml -f compose.dev.yml up -d
+```
+
+To use the published GHCR image instead (after a release or manual publish):
+
+```bash
+docker compose pull
+docker compose up -d
+```
 
 ## Maintainer notes
 
