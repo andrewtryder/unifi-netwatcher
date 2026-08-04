@@ -1,26 +1,27 @@
-
+import asyncio
+import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+
 import alembic.command
 import alembic.config
-import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import logging
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
-from app.api.routes_scans import router as scans_router
 from app.api.routes_devices import router as devices_api_router
-from app.api.routes_notifications import router as notifications_router
 from app.api.routes_import_export import router as tools_router
-from app.web.routes import router as web_router
-from app.oui import update_oui_data
-from app.scanner import run_scan
+from app.api.routes_notifications import router as notifications_router
+from app.api.routes_scans import router as scans_router
+from app.config import settings
 from app.db import SessionLocal
 from app.models import OuiEntry
-from app.config import settings
+from app.oui import update_oui_data
+from app.scanner import run_scan
+from app.web.routes import router as web_router
 
 logger = logging.getLogger(__name__)
 scheduler = AsyncIOScheduler()
+
 
 async def scheduled_oui_update():
     logger.info("Running scheduled OUI data update...")
@@ -29,6 +30,7 @@ async def scheduled_oui_update():
         await update_oui_data(db)
     finally:
         db.close()
+
 
 def scheduled_scan():
     logger.info("Running scheduled scan...")
@@ -40,6 +42,7 @@ def scheduled_scan():
     finally:
         db.close()
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run alembic migrations on startup
@@ -47,8 +50,8 @@ async def lifespan(app: FastAPI):
     alembic.command.upgrade(alembic_cfg, "head")
 
     # Initialize scheduler
-    scheduler.add_job(scheduled_oui_update, 'interval', days=7)
-    scheduler.add_job(scheduled_scan, 'interval', seconds=settings.SCAN_INTERVAL_SECONDS)
+    scheduler.add_job(scheduled_oui_update, "interval", days=7)
+    scheduler.add_job(scheduled_scan, "interval", seconds=settings.SCAN_INTERVAL_SECONDS)
     scheduler.start()
 
     # Check if OUI DB is empty and trigger immediate download if so
@@ -64,6 +67,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.shutdown()
 
+
 app = FastAPI(title="NetWatcher for UniFi", lifespan=lifespan)
 
 # Mount static files
@@ -76,9 +80,11 @@ app.include_router(devices_api_router, prefix="/api/devices", tags=["devices"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(tools_router, prefix="/tools", tags=["tools"])
 
+
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
 
 @app.get("/readyz")
 def readyz():

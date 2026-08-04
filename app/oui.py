@@ -1,9 +1,9 @@
-import re
-import httpx
 import logging
-from typing import Dict
-from sqlalchemy.orm import Session
+import re
+
+import httpx
 from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.orm import Session
 
 from app.models import OuiEntry
 
@@ -11,13 +11,17 @@ logger = logging.getLogger(__name__)
 
 OUI_URL = "https://standards-oui.ieee.org/oui/oui.txt"
 
+
 def is_start(first_line: str, second_line: str) -> bool:
     if first_line is None or second_line is None:
         return False
-    return len(first_line.strip()) == 0 and bool(re.search(r'([0-9A-F]{2}[-]){2}([0-9A-F]{2})', second_line))
+    return len(first_line.strip()) == 0 and bool(
+        re.search(r"([0-9A-F]{2}[-]){2}([0-9A-F]{2})", second_line)
+    )
 
-def parse_oui_data(text: str) -> Dict[str, str]:
-    lines = text.split('\n')
+
+def parse_oui_data(text: str) -> dict[str, str]:
+    lines = text.split("\n")
     result = {}
     i = 0
     while i < len(lines):
@@ -25,7 +29,7 @@ def parse_oui_data(text: str) -> Dict[str, str]:
             if i + 2 >= len(lines):
                 break
             oui = lines[i + 2][:6].strip().upper()
-            owner = re.sub(r'\((hex|base 16)\)', '', lines[i + 1])[10:].strip()
+            owner = re.sub(r"\((hex|base 16)\)", "", lines[i + 1])[10:].strip()
 
             i += 3
             while i < len(lines) and (i + 1 >= len(lines) or not is_start(lines[i], lines[i + 1])):
@@ -34,13 +38,14 @@ def parse_oui_data(text: str) -> Dict[str, str]:
                 #     owner += f"\n{lines[i].strip()}"
                 i += 1
 
-            owner = re.sub(r'[ \t]+', ' ', owner)
+            owner = re.sub(r"[ \t]+", " ", owner)
             if len(oui) == 6:
                 mac_prefix = f"{oui[0:2]}:{oui[2:4]}:{oui[4:6]}".lower()
                 result[mac_prefix] = owner
         else:
             i += 1
     return result
+
 
 async def update_oui_data(db: Session):
     logger.info(f"Downloading OUI data from {OUI_URL}")
@@ -50,7 +55,7 @@ async def update_oui_data(db: Session):
             response.raise_for_status()
             text = response.text
 
-            if not re.search(r'^(OUI|[#]|[A-Fa-f0-9])', text):
+            if not re.search(r"^(OUI|[#]|[A-Fa-f0-9])", text):
                 raise ValueError("Downloaded file does not look like a oui-data.txt file")
 
             logger.info("Parsing OUI data...")
@@ -58,14 +63,15 @@ async def update_oui_data(db: Session):
             logger.info(f"Parsed {len(entries)} OUI entries. Updating database...")
 
             # Using SQLite ON CONFLICT DO UPDATE
-            stmt = insert(OuiEntry).values([
-                {"mac_prefix": mac_prefix, "vendor": vendor}
-                for mac_prefix, vendor in entries.items()
-            ])
+            stmt = insert(OuiEntry).values(
+                [
+                    {"mac_prefix": mac_prefix, "vendor": vendor}
+                    for mac_prefix, vendor in entries.items()
+                ]
+            )
 
             stmt = stmt.on_conflict_do_update(
-                index_elements=['mac_prefix'],
-                set_=dict(vendor=stmt.excluded.vendor)
+                index_elements=["mac_prefix"], set_=dict(vendor=stmt.excluded.vendor)
             )
 
             # Execute in batches if it's too large, but 30k entries should be fine in one go for SQLite

@@ -1,0 +1,67 @@
+[project]
+name = "unifi-netwatcher"
+version = "0.2.0"
+description = "Lightweight UniFi unknown-device monitor with WebUI and pluggable alerts"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "jinja2",
+    "sqlalchemy",
+    "alembic",
+    "python-dotenv",
+    "httpx",
+    "apscheduler",
+    "python-multipart",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "pre-commit",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["app", "tests"]
+exclude = ["migrations"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+]
+ignore = [
+    "B008",  # FastAPI Depends()/File() in argument defaults is idiomatic
+    "E501",  # line length; ruff format handles wrapping
+    "E701",  # one-line if/return used widely; avoid large drive-by refactors
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B011"]
+"migrations/**" = ["E402", "F403"]
+
+[tool.pytest.ini_options]
+addopts = "--cov=app --cov-report=term-missing --cov-fail-under=70"
+asyncio_mode = "auto"
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["app"]
+branch = false
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false

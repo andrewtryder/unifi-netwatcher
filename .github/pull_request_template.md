@@ -9,5 +9,5 @@ This becomes the squash commit on `main` and drives Release Please versioning.
 
 ## Test plan
 
-- [ ] `pytest`
+- [ ] `uv run pytest`
 - [ ] Manual testing (if applicable)
