@@ -1,4 +1,4 @@
-FROM node:20-slim AS assets
+FROM node:26-slim AS assets
 WORKDIR /app
 COPY package.json package-lock.json* ./
 RUN npm ci
