@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/netwatcher.png" alt="NetWatcher logo" width="160">
+  <img src="docs/assets/screenshot.png" alt="NetWatcher dashboard" width="800">
 </p>
 
 # NetWatcher for UniFi
@@ -58,20 +58,19 @@ docker compose up -d
 
 ### Native Python / Node
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+Requires [uv](https://docs.astral.sh/uv/) and Node 20+.
 
-npm install
-npm run build:css
+```bash
+uv sync
+npm ci && npm run build:css
 
 cp .env.example .env
-uvicorn app.main:app --reload --port 8080
+uv run uvicorn app.main:app --reload --port 8080
 ```
 
 For local development without a UniFi controller, set `UNIFI_MOCK_MODE=true` in `.env`.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for PR title conventions, hooks, and release flow.
 ### Docker-based development
 
 Builds from source and enables mock mode via `compose.dev.yml`:
@@ -115,9 +114,3 @@ Versioning is automated with [Release Please](https://github.com/googleapis/rele
 - **Use a dedicated UniFi account** with only the permissions NetWatcher needs.
 - **`UNIFI_VERIFY_SSL=false`** should only be used on trusted LANs.
 - **Protect the data directory.** Notification secrets and UniFi configuration may be stored in local files and SQLite under `./data`.
-
-## Screenshot
-
-<p align="center">
-  <img src="docs/assets/screenshot.png" alt="NetWatcher dashboard showing device stats and scanner status" width="900">
-</p>
