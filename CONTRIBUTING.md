@@ -19,7 +19,7 @@ Examples: `feat: add webhook retries`, `fix: handle empty UniFi client list`.
 
 ## Local development
 
-Requires [uv](https://docs.astral.sh/uv/), Node 20+, and optionally Docker.
+Requires [uv](https://docs.astral.sh/uv/), **Python 3.14+**, Node 20+, and optionally Docker.
 
 ```bash
 git clone https://github.com/andrewtryder/unifi-netwatcher.git

@@ -58,7 +58,7 @@ docker compose up -d
 
 ### Native Python / Node
 
-Requires [uv](https://docs.astral.sh/uv/) and Node 20+.
+Requires [uv](https://docs.astral.sh/uv/), **Python 3.14+**, and Node 20+.
 
 ```bash
 uv sync
