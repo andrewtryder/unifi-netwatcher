@@ -1,9 +1,10 @@
-import pytest
+from unittest.mock import MagicMock, patch
+
 import httpx
-from unittest.mock import patch, MagicMock
-from app.oui import parse_oui_data, update_oui_data
-from app.models import OuiEntry
+import pytest
 from app.db import Base
+from app.models import OuiEntry
+from app.oui import parse_oui_data, update_oui_data
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -21,11 +22,13 @@ sample_oui_text = """
 				US
 """
 
+
 def test_parse_oui_data():
     entries = parse_oui_data(sample_oui_text)
     assert len(entries) == 2
-    assert entries.get('28:6f:b9') == 'Nokia Shanghai Bell Co., Ltd.'
-    assert entries.get('38:e2:ca') == 'Katun Corporation'
+    assert entries.get("28:6f:b9") == "Nokia Shanghai Bell Co., Ltd."
+    assert entries.get("38:e2:ca") == "Katun Corporation"
+
 
 @pytest.mark.asyncio
 async def test_update_oui_data():
@@ -46,11 +49,11 @@ async def test_update_oui_data():
     async def mock_get(*args, **kwargs):
         return MockResponse("OUI\n" + sample_oui_text, 200)
 
-    with patch('httpx.AsyncClient.get', side_effect=mock_get):
+    with patch("httpx.AsyncClient.get", side_effect=mock_get):
         await update_oui_data(db)
 
     entries = db.query(OuiEntry).all()
     assert len(entries) == 2
 
-    nokia = db.query(OuiEntry).filter_by(mac_prefix='28:6f:b9').first()
-    assert nokia.vendor == 'Nokia Shanghai Bell Co., Ltd.'
+    nokia = db.query(OuiEntry).filter_by(mac_prefix="28:6f:b9").first()
+    assert nokia.vendor == "Nokia Shanghai Bell Co., Ltd."

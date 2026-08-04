@@ -1,16 +1,18 @@
 import json
 import logging
 from pathlib import Path
+from typing import Any
+
 import httpx
-from typing import List, Dict, Any
 
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+
 class UnifiClient:
     def __init__(self):
-        self.base_url = settings.UNIFI_URL.rstrip('/')
+        self.base_url = settings.UNIFI_URL.rstrip("/")
         self.site = settings.UNIFI_SITE
         self.username = settings.UNIFI_USERNAME
         self.password = settings.UNIFI_PASSWORD
@@ -21,10 +23,10 @@ class UnifiClient:
         self.client = httpx.Client(verify=self.verify_ssl, timeout=self.timeout)
         self._logged_in = False
 
-    def _get_mock_data(self) -> List[Dict[str, Any]]:
+    def _get_mock_data(self) -> list[dict[str, Any]]:
         mock_file = Path(__file__).parent / "mock_unifi_data.json"
         try:
-            with open(mock_file, 'r') as f:
+            with open(mock_file) as f:
                 data = json.load(f)
                 return data.get("data", [])
         except Exception as e:
@@ -48,37 +50,41 @@ class UnifiClient:
             logger.error(f"Failed to login to UniFi Controller: {e}")
             return False
 
-    def get_clients(self) -> List[Dict[str, Any]]:
+    def get_clients(self) -> list[dict[str, Any]]:
         if self.mock_mode:
             logger.info("UniFi Client running in MOCK MODE. Returning mock clients.")
             return self._get_mock_data()
 
-        if not self._logged_in and not self.login(): return []
+        if not self._logged_in and not self.login():
+            return []
 
         url = f"{self.base_url}/proxy/network/api/s/{self.site}/stat/sta"
         try:
             r = self.client.get(url)
             if r.status_code == 401:
-                if self.login(): r = self.client.get(url)
+                if self.login():
+                    r = self.client.get(url)
             r.raise_for_status()
             return r.json().get("data", [])
         except Exception as e:
             logger.error(f"Failed to fetch clients: {e}")
             return []
-            
+
     def _stamgr_cmd(self, cmd: str, mac: str) -> bool:
         if self.mock_mode or self.dry_run_blocks:
             logger.info(f"[DRY RUN/MOCK] Would execute {cmd} on {mac}")
             return True
-            
-        if not self._logged_in and not self.login(): return False
-        
+
+        if not self._logged_in and not self.login():
+            return False
+
         url = f"{self.base_url}/proxy/network/api/s/{self.site}/cmd/stamgr"
         payload = {"cmd": cmd, "mac": mac}
         try:
             r = self.client.post(url, json=payload)
             if r.status_code == 401:
-                if self.login(): r = self.client.post(url, json=payload)
+                if self.login():
+                    r = self.client.post(url, json=payload)
             r.raise_for_status()
             return True
         except Exception as e:
@@ -87,6 +93,6 @@ class UnifiClient:
 
     def block_client(self, mac: str) -> bool:
         return self._stamgr_cmd("block-sta", mac)
-        
+
     def unblock_client(self, mac: str) -> bool:
         return self._stamgr_cmd("unblock-sta", mac)

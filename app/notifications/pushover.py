@@ -1,12 +1,15 @@
-import httpx
 import logging
+
+import httpx
+
 from app.notifications.base import NotificationProvider
 
 logger = logging.getLogger(__name__)
 
+
 class PushoverProvider(NotificationProvider):
     type = "pushover"
-    
+
     def validate_config(self, config: dict) -> bool:
         return "token" in config and "user" in config
 
@@ -17,9 +20,9 @@ class PushoverProvider(NotificationProvider):
             "user": config.get("user"),
             "message": message,
             "title": "NetWatcher Alert",
-            "priority": config.get("priority", 0)
+            "priority": config.get("priority", 0),
         }
-        
+
         try:
             with httpx.Client(timeout=10) as client:
                 r = client.post(url, data=payload)

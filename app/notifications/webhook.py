@@ -1,15 +1,18 @@
 import json
-import httpx
 import logging
+
+import httpx
+
 from app.notifications.base import NotificationProvider
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BODY_TEMPLATE = '{"text": "{{message}}"}'
 
+
 class WebhookProvider(NotificationProvider):
     type = "webhook"
-    
+
     def validate_config(self, config: dict) -> bool:
         return "url" in config
 

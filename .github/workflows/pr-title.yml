@@ -1,7 +1,8 @@
 name: Lint PR
 
 on:
-  pull_request_target:
+  # Title-only validation; does not checkout or execute untrusted PR code.
+  pull_request_target: # zizmor: ignore[dangerous-triggers]
     types:
       - opened
       - edited
@@ -9,15 +10,20 @@ on:
       - labeled
       - unlabeled
 
+concurrency:
+  group: pr-title-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
-  pull-requests: read
+  pull-requests: read # Inspect PR metadata for Conventional Commit title validation
 
 jobs:
   validate-pr-title:
     name: Validate PR title
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
-      - uses: amannn/action-semantic-pull-request@v5
+      - uses: amannn/action-semantic-pull-request@0723387faaf9b38adef4775cd42cfd5155ed6017 # v5.5.3
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -25,6 +31,7 @@ jobs:
             build
             chore
             ci
+            deps
             docs
             feat
             fix

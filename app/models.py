@@ -1,8 +1,10 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.orm import relationship
 import datetime
 
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
+
 from app.db import Base
+
 
 class Device(Base):
     __tablename__ = "devices"
@@ -13,7 +15,7 @@ class Device(Base):
     display_name = Column(String)
     ip = Column(String)
     vendor = Column(String)
-    status = Column(String, default='unknown', nullable=False)
+    status = Column(String, default="unknown", nullable=False)
     first_seen_at = Column(DateTime)
     last_seen_at = Column(DateTime)
     last_site = Column(String)
@@ -21,7 +23,12 @@ class Device(Base):
     last_ap_mac = Column(String)
     notes = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+    )
 
     observations = relationship("Observation", back_populates="device")
     events = relationship("Event", back_populates="device")
@@ -50,7 +57,7 @@ class Event(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     device_id = Column(Integer, ForeignKey("devices.id"))
     event_type = Column(String, nullable=False)
-    severity = Column(String, default='info', nullable=False)
+    severity = Column(String, default="info", nullable=False)
     message = Column(String)
     metadata_json = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
@@ -67,7 +74,12 @@ class NotificationChannel(Base):
     enabled = Column(Boolean, default=True, nullable=False)
     config_json = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+    )
 
 
 class NotificationDelivery(Base):
@@ -88,7 +100,12 @@ class Setting(Base):
 
     key = Column(String, primary_key=True)
     value = Column(String)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+    )
 
 
 class AuditLog(Base):
@@ -108,4 +125,9 @@ class OuiEntry(Base):
 
     mac_prefix = Column(String, primary_key=True, index=True)
     vendor = Column(String, nullable=False)
-    updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow, nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=datetime.datetime.utcnow,
+        onupdate=datetime.datetime.utcnow,
+        nullable=False,
+    )

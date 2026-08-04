@@ -1,17 +1,16 @@
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
 
 
-def format_relative_ago(dt: Optional[datetime], *, parens: bool = False) -> str:
+def format_relative_ago(dt: datetime | None, *, parens: bool = False) -> str:
     if dt is None:
         return ""
 
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt = dt.astimezone(UTC)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     seconds = max(0, int((now - dt).total_seconds()))
 
     if seconds < 60:
