@@ -26,6 +26,12 @@ updates:
       npm-deps:
         patterns:
           - "*"
+    # Tailwind v4 drops the standalone `tailwindcss` CLI; stay on v3 until we migrate.
+    ignore:
+      - dependency-name: tailwindcss
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@tailwindcss/forms"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /
