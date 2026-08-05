@@ -15,6 +15,8 @@ def get_env_bool(key: str, default: bool = False) -> bool:
 
 
 class Settings:
+    APP_ENV: str = os.environ.get("APP_ENV", "production").strip().lower() or "production"
+
     # UniFi Settings
     UNIFI_URL: str = os.environ.get("UNIFI_URL", "https://unifi.example.local")
     UNIFI_USERNAME: str = os.environ.get("UNIFI_USERNAME", "admin")
@@ -31,7 +33,14 @@ class Settings:
     SCAN_INTERVAL_SECONDS: int = int(os.environ.get("SCAN_INTERVAL_SECONDS", "300"))
     ALERT_COOLDOWN_SECONDS: int = int(os.environ.get("ALERT_COOLDOWN_SECONDS", "21600"))
 
+    # Retention (0 = disabled / never prune)
+    OBSERVATION_RETENTION_DAYS: int = int(os.environ.get("OBSERVATION_RETENTION_DAYS", "30"))
+    EVENT_RETENTION_DAYS: int = int(os.environ.get("EVENT_RETENTION_DAYS", "90"))
+
     UNIFI_DRY_RUN_BLOCKS: bool = get_env_bool("UNIFI_DRY_RUN_BLOCKS", True)
+
+    # Emergency CIDR bypass only — does not disable auth or reset passwords.
+    SECURITY_RECOVERY_BYPASS: bool = get_env_bool("SECURITY_RECOVERY_BYPASS", False)
 
 
 settings = Settings()

@@ -21,6 +21,22 @@ class Device(Base):
     last_site = Column(String)
     last_ssid = Column(String)
     last_ap_mac = Column(String)
+    # UniFi client telemetry (updated each scan; all nullable)
+    name = Column(String)  # Admin-set alias from controller
+    is_wired = Column(Boolean)
+    radio_proto = Column(String)
+    channel = Column(Integer)
+    rssi = Column(Integer)
+    satisfaction = Column(Integer)
+    tx_rate_bps = Column(Integer)
+    rx_rate_bps = Column(Integer)
+    tx_bytes_r = Column(Integer)
+    rx_bytes_r = Column(Integer)
+    sw_port = Column(Integer)
+    dev_cat = Column(String)
+    dev_family = Column(String)
+    dev_vendor = Column(String)
+    os_name = Column(String)
     notes = Column(String)
     created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
     updated_at = Column(
@@ -131,3 +147,7 @@ class OuiEntry(Base):
         onupdate=datetime.datetime.utcnow,
         nullable=False,
     )
+
+
+# Re-export for Alembic `from app.models import *`
+from app.security.models import SecuritySettings  # noqa: E402, F401

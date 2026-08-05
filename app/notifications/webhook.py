@@ -1,9 +1,8 @@
 import json
 import logging
 
-import httpx
-
 from app.notifications.base import NotificationProvider
+from app.notifications.http import get_notification_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,26 +24,26 @@ class WebhookProvider(NotificationProvider):
         url = config.get("url")
         method = config.get("method", "POST").upper()
         headers = config.get("headers") or {}
+        client = get_notification_http_client()
 
         try:
-            with httpx.Client(timeout=10) as client:
-                if method == "GET":
-                    param_name = config.get("query_param", "text")
-                    r = client.get(url, params={param_name: message}, headers=headers)
-                elif method in ("POST", "PUT"):
-                    try:
-                        payload = self._build_payload(message, config)
-                    except json.JSONDecodeError as e:
-                        return False, 0, "", f"Invalid body template JSON: {e}"
-                    if method == "POST":
-                        r = client.post(url, json=payload, headers=headers)
-                    else:
-                        r = client.put(url, json=payload, headers=headers)
+            if method == "GET":
+                param_name = config.get("query_param", "text")
+                r = client.get(url, params={param_name: message}, headers=headers)
+            elif method in ("POST", "PUT"):
+                try:
+                    payload = self._build_payload(message, config)
+                except json.JSONDecodeError as e:
+                    return False, 0, "", f"Invalid body template JSON: {e}"
+                if method == "POST":
+                    r = client.post(url, json=payload, headers=headers)
                 else:
-                    return False, 0, "", f"Unsupported method: {method}"
+                    r = client.put(url, json=payload, headers=headers)
+            else:
+                return False, 0, "", f"Unsupported method: {method}"
 
-                success = r.status_code in (200, 201, 202, 204)
-                return success, r.status_code, r.text, ""
+            success = r.status_code in (200, 201, 202, 204)
+            return success, r.status_code, r.text, ""
         except Exception as e:
             logger.error(f"Webhook send error: {e}")
             return False, 0, "", str(e)

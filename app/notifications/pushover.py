@@ -1,8 +1,7 @@
 import logging
 
-import httpx
-
 from app.notifications.base import NotificationProvider
+from app.notifications.http import get_notification_http_client
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +23,10 @@ class PushoverProvider(NotificationProvider):
         }
 
         try:
-            with httpx.Client(timeout=10) as client:
-                r = client.post(url, data=payload)
-                success = r.status_code == 200
-                return success, r.status_code, r.text, ""
+            client = get_notification_http_client()
+            r = client.post(url, data=payload)
+            success = r.status_code == 200
+            return success, r.status_code, r.text, ""
         except Exception as e:
             logger.error(f"Pushover send error: {e}")
             return False, 0, "", str(e)

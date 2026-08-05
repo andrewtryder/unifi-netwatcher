@@ -14,6 +14,7 @@ dependencies = [
     "httpx",
     "apscheduler",
     "python-multipart",
+    "pwdlib[argon2]==0.2.1",
 ]
 
 [dependency-groups]
