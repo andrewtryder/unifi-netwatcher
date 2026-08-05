@@ -56,6 +56,48 @@ def test_settings_accepts_development_placeholder():
     assert s.APP_ENV == "development"
 
 
+def test_settings_rejects_app_env_typo():
+    with pytest.raises(ValidationError):
+        Settings(
+            APP_ENV="prodution",
+            APP_SECRET_KEY=SecretStr(""),
+            UNIFI_MOCK_MODE=True,
+            _env_file=None,
+        )
+
+
+def test_settings_accepts_development_example_secret():
+    s = Settings(
+        APP_ENV="development",
+        APP_SECRET_KEY=SecretStr("dev-only-secret-key-change-me"),
+        UNIFI_MOCK_MODE=True,
+        _env_file=None,
+    )
+    assert s.APP_ENV == "development"
+
+
+def test_settings_rejects_invalid_public_origin():
+    with pytest.raises(ValidationError):
+        Settings(
+            APP_ENV="development",
+            APP_SECRET_KEY=SecretStr("change-me"),
+            UNIFI_MOCK_MODE=True,
+            PUBLIC_ORIGIN="netwatcher.home.arpa",
+            _env_file=None,
+        )
+
+
+def test_settings_normalizes_public_origin():
+    s = Settings(
+        APP_ENV="development",
+        APP_SECRET_KEY=SecretStr("change-me"),
+        UNIFI_MOCK_MODE=True,
+        PUBLIC_ORIGIN="https://netwatcher.home.arpa/",
+        _env_file=None,
+    )
+    assert s.PUBLIC_ORIGIN == "https://netwatcher.home.arpa"
+
+
 def test_settings_rejects_invalid_timeout(monkeypatch):
     monkeypatch.setenv("UNIFI_TIMEOUT_SECONDS", "0")
     monkeypatch.setenv("APP_ENV", "development")

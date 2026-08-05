@@ -97,7 +97,7 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
-      - name: Build image
+      - name: Build multi-arch image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -106,6 +106,53 @@ jobs:
           tags: unifi-netwatcher:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build and load smoke image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          load: true
+          tags: unifi-netwatcher:ci-smoke
+          cache-from: type=gha
+
+      - name: Runtime smoke (entrypoint, migrate, /readyz)
+        run: |
+          set -euo pipefail
+          VOL="nw-ci-smoke-$$"
+          CID=""
+          cleanup() {
+            if [ -n "${CID}" ]; then docker rm -f "${CID}" >/dev/null 2>&1 || true; fi
+            docker volume rm -f "${VOL}" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker volume create "${VOL}" >/dev/null
+          CID="$(docker run -d \
+            --name "nw-smoke-$$" \
+            --read-only \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges:true \
+            --tmpfs /tmp:rw,size=64m \
+            -v "${VOL}:/app/data" \
+            -p 18080:8080 \
+            -e APP_ENV=production \
+            -e APP_SECRET_KEY= \
+            -e UNIFI_MOCK_MODE=true \
+            -e DATABASE_URL=sqlite:////app/data/netwatcher.db \
+            unifi-netwatcher:ci-smoke)"
+          for i in $(seq 1 60); do
+            if curl -fsS "http://127.0.0.1:18080/readyz" >/dev/null; then
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              docker logs "${CID}" || true
+              echo "readyz did not become healthy" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+          docker run --rm -v "${VOL}:/data:ro" busybox:1.36 \
+            test -f /data/app-secret.key
+          echo "smoke ok"
 
   actions-lint:
     name: actions-lint

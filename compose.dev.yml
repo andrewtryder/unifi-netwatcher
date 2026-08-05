@@ -4,9 +4,11 @@ services:
       context: .
       dockerfile: Dockerfile
     image: unifi-netwatcher:dev
-    volumes:
+    # Override production named volume with a host bind mount for local inspection.
+    # Host dir must be writable by uid 10001:
+    #   mkdir -p data && sudo chown -R 10001:10001 data
+    volumes: !override
       - ./data:/app/data
-      - ./logs:/app/logs
     environment:
       APP_ENV: development
       UNIFI_MOCK_MODE: "true"

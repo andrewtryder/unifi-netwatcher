@@ -67,7 +67,7 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Extract metadata
+      - name: Extract release tags
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
@@ -81,19 +81,48 @@ jobs:
             type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' }}
             type=raw,value=latest
 
-      - name: Build and push
+      - name: Candidate tag
+        id: candidate
+        run: |
+          set -euo pipefail
+          short="$(echo '${{ github.sha }}' | cut -c1-12)"
+          echo "tag=candidate-${short}" >> "$GITHUB_OUTPUT"
+          echo "ghcr=ghcr.io/andrewtryder/unifi-netwatcher:candidate-${short}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push candidate
         id: build
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ steps.candidate.outputs.ghcr }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: true
           sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Scan candidate with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/andrewtryder/unifi-netwatcher@${{ steps.build.outputs.digest }}
+          format: table
+          exit-code: "1"
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+
+      - name: Promote verified digest to release tags
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          src="ghcr.io/andrewtryder/unifi-netwatcher@${DIGEST}"
+          while IFS= read -r tag; do
+            [ -n "${tag}" ] || continue
+            docker buildx imagetools create --tag "${tag}" "${src}"
+          done <<< "${TAGS}"
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@d7d6bc7722e3daa8354c50bcb52f4837da5e9b6a # v3.8.1
@@ -106,15 +135,6 @@ jobs:
           for image in ghcr.io/andrewtryder/unifi-netwatcher andrewtryder/unifi-netwatcher; do
             cosign sign --yes "${image}@${DIGEST}"
           done
-
-      - name: Scan image with Trivy
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: ghcr.io/andrewtryder/unifi-netwatcher@${{ steps.build.outputs.digest }}
-          format: table
-          exit-code: "1"
-          severity: CRITICAL,HIGH
-          ignore-unfixed: true
 
       - name: Publish digest to release notes
         if: ${{ needs.release-please.outputs.release_created == 'true' }}

@@ -5,7 +5,12 @@ import logging
 from typing import Any
 
 from app.notifications.base import NotificationProvider
-from app.notifications.http import get_notification_http_client, read_capped_response_text
+from app.notifications.http import (
+    ResponseBodyLimitExceeded,
+    ResponseReadDeadlineExceeded,
+    get_notification_http_client,
+    read_capped_response_text,
+)
 from app.notifications.ssrf import WebhookURLError, pinned_request_url, resolve_webhook_target
 
 logger = logging.getLogger(__name__)
@@ -117,6 +122,9 @@ class WebhookProvider(NotificationProvider):
                 body = read_capped_response_text(r)
                 success = r.status_code in (200, 201, 202, 204)
                 return success, r.status_code, body, ""
+        except (ResponseBodyLimitExceeded, ResponseReadDeadlineExceeded) as e:
+            logger.error("Webhook response aborted: %s", e)
+            return False, 0, "", str(e)
         except Exception as e:
             logger.error(f"Webhook send error: {e}")
             return False, 0, "", str(e)

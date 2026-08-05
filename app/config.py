@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Literal
+from urllib.parse import urlparse
 
 from pydantic import (
     BeforeValidator,
@@ -11,6 +12,9 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+AppEnv = Literal["production", "development", "test"]
+_VALID_APP_ENVS = frozenset({"production", "development", "test"})
 
 _PLACEHOLDER_SECRETS = frozenset(
     {
@@ -54,9 +58,13 @@ class Settings(BaseSettings):
         case_sensitive=True,
     )
 
-    APP_ENV: str = "production"
+    APP_ENV: AppEnv = "production"
     APP_SECRET_KEY: SecretStr = SecretStr("")
     APP_SECRET_KEY_PATH: str = "data/app-secret.key"
+
+    # Absolute browser origin (scheme://host[:port]) when behind an HTTPS reverse proxy.
+    # Used for same-origin checks; leave empty for direct LAN access.
+    PUBLIC_ORIGIN: str = ""
 
     UNIFI_URL: str = "https://unifi.example.local"
     UNIFI_USERNAME: str = "admin"
@@ -87,7 +95,28 @@ class Settings(BaseSettings):
     def _normalize_app_env(cls, value: object) -> str:
         if value is None or value == "":
             return "production"
-        return str(value).strip().lower()
+        normalized = str(value).strip().lower()
+        if normalized not in _VALID_APP_ENVS:
+            raise ValueError(
+                f"APP_ENV must be one of {sorted(_VALID_APP_ENVS)}, got {normalized!r}"
+            )
+        return normalized
+
+    @field_validator("PUBLIC_ORIGIN")
+    @classmethod
+    def _validate_public_origin(cls, value: str) -> str:
+        origin = (value or "").strip().rstrip("/")
+        if not origin:
+            return ""
+        parsed = urlparse(origin)
+        if parsed.scheme not in ("http", "https") or not parsed.netloc:
+            raise ValueError(
+                "PUBLIC_ORIGIN must be an absolute origin like "
+                "https://netwatcher.home.arpa (scheme://host[:port], no path)"
+            )
+        if parsed.path not in ("", "/") or parsed.query or parsed.fragment or parsed.params:
+            raise ValueError("PUBLIC_ORIGIN must not include a path, query, or fragment")
+        return f"{parsed.scheme}://{parsed.netloc}"
 
     @field_validator("UNIFI_CA_BUNDLE")
     @classmethod

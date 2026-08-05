@@ -6,20 +6,31 @@ from app.notifications.webhook import WebhookProvider, _replace_placeholders
 
 
 class MockStreamResponse:
-    def __init__(self, status_code, body: bytes = b"mocked"):
+    def __init__(
+        self, status_code, body: bytes = b"mocked", *, chunk_size: int = 1024, delay_s: float = 0.0
+    ):
         self.status_code = status_code
         self._body = body
+        self._chunk_size = chunk_size
+        self._delay_s = delay_s
+        self.closed = False
 
     def iter_bytes(self):
-        # Yield in chunks to exercise the cap path
-        chunk_size = 1024
-        for i in range(0, len(self._body), chunk_size):
-            yield self._body[i : i + chunk_size]
+        import time
+
+        for i in range(0, len(self._body), self._chunk_size):
+            if self._delay_s:
+                time.sleep(self._delay_s)
+            yield self._body[i : i + self._chunk_size]
+
+    def close(self):
+        self.closed = True
 
     def __enter__(self):
         return self
 
     def __exit__(self, *args):
+        self.close()
         return False
 
 
@@ -107,19 +118,57 @@ def test_webhook_get_method(monkeypatch, allow_webhook_urls):
     assert captured["params"] == {"text": "hello"}
 
 
-def test_webhook_response_truncated(monkeypatch, allow_webhook_urls):
+def test_webhook_response_oversize_fails(monkeypatch, allow_webhook_urls):
     provider = WebhookProvider()
     oversized = b"x" * (MAX_RESPONSE_BYTES + 5000)
+    responses: list[MockStreamResponse] = []
 
     def mock_stream(self, method, url, **kwargs):
-        return MockStreamResponse(200, oversized)
+        resp = MockStreamResponse(200, oversized)
+        responses.append(resp)
+        return resp
 
     monkeypatch.setattr(httpx.Client, "stream", mock_stream)
     success, sc, body, err = provider.send(
         "hello", {"url": "https://hooks.example.com", "method": "POST"}
     )
-    assert success is True
-    assert len(body.encode("utf-8")) <= MAX_RESPONSE_BYTES
+    assert success is False
+    assert sc == 0
+    assert "byte limit" in err
+    assert responses and responses[0].closed is True
+
+
+def test_webhook_response_deadline_fails(monkeypatch, allow_webhook_urls):
+    provider = WebhookProvider()
+    # Slow drip would previously keep draining within per-read timeouts.
+    body = b"x" * (MAX_RESPONSE_BYTES + 100)
+
+    def mock_stream(self, method, url, **kwargs):
+        return MockStreamResponse(200, body, chunk_size=64, delay_s=0.05)
+
+    monkeypatch.setattr(httpx.Client, "stream", mock_stream)
+    monkeypatch.setattr(
+        "app.notifications.http.RESPONSE_READ_DEADLINE_SECONDS",
+        0.1,
+    )
+    # Also pass via patching read call site — read uses default at call time from module.
+    from app.notifications import http as http_mod
+
+    original = http_mod.read_capped_response_text
+
+    def read_with_short_deadline(response, **kwargs):
+        kwargs.setdefault("deadline_seconds", 0.1)
+        return original(response, **kwargs)
+
+    monkeypatch.setattr(
+        "app.notifications.webhook.read_capped_response_text",
+        read_with_short_deadline,
+    )
+    success, sc, body_text, err = provider.send(
+        "hello", {"url": "https://hooks.example.com", "method": "POST"}
+    )
+    assert success is False
+    assert "deadline" in err.lower() or "byte limit" in err.lower()
 
 
 def test_notification_client_ignores_proxy_env(monkeypatch):

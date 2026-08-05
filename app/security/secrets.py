@@ -68,6 +68,34 @@ def write_key_file(path: Path, key: bytes) -> None:
         logger.warning("Could not set mode 0600 on %s", path)
 
 
+def write_key_file_atomic(path: Path, key: bytes) -> None:
+    """Write key via a same-directory temp file and os.replace."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    data = key + (b"\n" if not key.endswith(b"\n") else b"")
+    try:
+        tmp.write_bytes(data)
+        try:
+            os.chmod(tmp, 0o600)
+        except OSError:
+            logger.warning("Could not set mode 0600 on %s", tmp)
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
+def key_staging_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.new")
+
+
+def key_backup_path(path: Path) -> Path:
+    return path.with_name(f"{path.name}.bak")
+
+
 def _load_key_file(path: Path) -> bytes | None:
     if not path.is_file():
         return None
@@ -107,7 +135,7 @@ def resolve_fernet(
         )
 
     generated = Fernet.generate_key()
-    write_key_file(path, generated)
+    write_key_file_atomic(path, generated)
     logger.info("Created Fernet key file at %s (mode 0600)", path)
     return Fernet(generated.strip()), "generated"
 
@@ -189,4 +217,22 @@ def can_decrypt(value: Any, *, fernet: Fernet | None = None) -> bool:
         decrypt_config(value, fernet=fernet)
         return True
     except SecretKeyError, ValueError, json.JSONDecodeError:
+        return False
+
+
+def cleanup_key_rotation_backup(key_path: Path | None = None) -> bool:
+    """Remove ``*.bak`` after startup has verified the active key can decrypt.
+
+    Leaves ``*.new`` in place so an interrupted replace can be finished manually.
+    """
+    path = key_path or default_secret_key_path()
+    bak = key_backup_path(path)
+    if not bak.is_file():
+        return False
+    try:
+        bak.unlink()
+        logger.info("Removed key rotation backup at %s", bak)
+        return True
+    except OSError:
+        logger.warning("Could not remove key rotation backup at %s", bak)
         return False
