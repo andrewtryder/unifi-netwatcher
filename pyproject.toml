@@ -14,7 +14,7 @@ dependencies = [
     "httpx",
     "apscheduler",
     "python-multipart",
-    "pwdlib[argon2]==0.2.1",
+    "pwdlib[argon2]==0.3.0",
     "pydantic-settings>=2.14.2",
     "cryptography>=50.0.0",
 ]
