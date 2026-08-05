@@ -83,9 +83,11 @@ jobs:
 
       - name: Candidate tag
         id: candidate
+        env:
+          SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          short="$(echo '${{ github.sha }}' | cut -c1-12)"
+          short="$(printf '%s' "$SHA" | cut -c1-12)"
           echo "tag=candidate-${short}" >> "$GITHUB_OUTPUT"
           echo "ghcr=ghcr.io/andrewtryder/unifi-netwatcher:candidate-${short}" >> "$GITHUB_OUTPUT"
 
