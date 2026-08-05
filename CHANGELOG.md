@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.2.0...v0.3.0) (2026-08-05)
+
+
+### Features
+
+* dashboard telemetry, access control, scan perf, and retention ([#15](https://github.com/andrewtryder/unifi-netwatcher/issues/15)) ([12c894b](https://github.com/andrewtryder/unifi-netwatcher/commit/12c894bf3b5ba2e76ae33c12e78280810c026e83))
+* harden LAN release-candidate defaults and recovery paths ([#21](https://github.com/andrewtryder/unifi-netwatcher/issues/21)) ([e716728](https://github.com/andrewtryder/unifi-netwatcher/commit/e716728e9530e946537c780f51a57f9bf560cc5d))
+* harden release security controls and supply chain ([#20](https://github.com/andrewtryder/unifi-netwatcher/issues/20)) ([d1f64c0](https://github.com/andrewtryder/unifi-netwatcher/commit/d1f64c05e244194f4513e7a43bb49fa7207b9e8e))
+
 ## [0.2.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.1.0...v0.2.0) (2026-07-01)
 
 
