@@ -9,14 +9,18 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.security.dependencies import require_same_origin
 from app.security.middleware import effective_client_ip
-from app.security.schemas import CidrPreviewResponse
+from app.security.schemas import CidrPreviewResponse, HostsPreviewResponse
 from app.security.service import (
     get_allowed_cidrs_list,
+    get_allowed_hosts_list,
     get_security_settings,
+    normalize_request_host,
     preview_cidrs,
+    preview_hosts,
     public_security_flags,
     update_authentication,
     update_cidr,
+    update_hosts,
 )
 from app.web.context import template_context
 from app.web.templates_env import templates
@@ -28,6 +32,7 @@ router = APIRouter()
 def security_page(request: Request, db: Session = Depends(get_db)):
     flags = public_security_flags(db)
     settings = get_security_settings(db)
+    raw_host = request.headers.get("host") or request.url.hostname or ""
     return templates.TemplateResponse(
         request=request,
         name="security.html",
@@ -36,7 +41,9 @@ def security_page(request: Request, db: Session = Depends(get_db)):
             request,
             **flags,
             allowed_cidrs_list=get_allowed_cidrs_list(settings),
+            allowed_hosts_list=get_allowed_hosts_list(settings),
             effective_client_ip=effective_client_ip(request),
+            effective_request_host=normalize_request_host(raw_host),
         ),
     )
 
@@ -108,6 +115,39 @@ def save_cidr(
     )
 
 
+@router.post("/htmx/hosts", response_class=HTMLResponse)
+def save_hosts(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_same_origin),
+    host_restriction_enabled: str | None = Form(None),
+    allowed_hosts: str = Form(""),
+    allow_lockout: str | None = Form(None),
+    lockout_confirmation: str = Form(""),
+):
+    raw_host = request.headers.get("host") or request.url.hostname or ""
+    result = update_hosts(
+        db,
+        host_restriction_enabled=host_restriction_enabled in ("on", "true", "1"),
+        hosts_text=allowed_hosts,
+        request_host=raw_host,
+        allow_lockout=allow_lockout in ("on", "true", "1"),
+        lockout_confirmation=lockout_confirmation,
+    )
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/security_message.html",
+        context={
+            "request": request,
+            "ok": result.ok,
+            "message": result.message,
+            "errors": result.errors or [],
+            "target_id": "hosts-msg",
+        },
+        status_code=200 if result.ok else 400,
+    )
+
+
 @router.post("/api/cidr-preview", response_model=CidrPreviewResponse)
 def cidr_preview(
     request: Request,
@@ -123,3 +163,21 @@ def cidr_preview(
         cidr_enabled=cidr_restriction_enabled in ("on", "true", "1"),
     )
     return CidrPreviewResponse(**payload)
+
+
+@router.post("/api/hosts-preview", response_model=HostsPreviewResponse)
+def hosts_preview(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = Depends(require_same_origin),
+    allowed_hosts: str = Form(""),
+    host_restriction_enabled: str | None = Form(None),
+):
+    _ = db
+    raw_host = request.headers.get("host") or request.url.hostname or ""
+    payload = preview_hosts(
+        allowed_hosts,
+        request_host=raw_host,
+        host_enabled=host_restriction_enabled in ("on", "true", "1"),
+    )
+    return HostsPreviewResponse(**payload)

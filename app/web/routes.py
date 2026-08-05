@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
 
-from app.api.routes_devices import log_action
 from app.db import get_db
 from app.models import Device, Event, NotificationChannel, Observation
+from app.services.context import request_context_from_request
+from app.services.devices import DeviceNotFoundError, DeviceService
 from app.web.context import template_context
 from app.web.display import build_dashboard_metrics
+from app.web.pagination import clamp_pagination, device_status_counts, paginate
 from app.web.templates_env import templates
 
 router = APIRouter()
@@ -14,10 +16,7 @@ router = APIRouter()
 
 @router.get("/", response_class=HTMLResponse)
 def dashboard(request: Request, db: Session = Depends(get_db)):
-    total = db.query(Device).count()
-    unknown = db.query(Device).filter(Device.status == "unknown").count()
-    trusted = db.query(Device).filter(Device.status == "trusted").count()
-    ignored = db.query(Device).filter(Device.status == "ignored").count()
+    counts = device_status_counts(db)
 
     last_scan = (
         db.query(Event)
@@ -42,7 +41,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         context=template_context(
             db,
             request,
-            stats={"total": total, "unknown": unknown, "trusted": trusted, "ignored": ignored},
+            device_counts=counts,
+            stats=counts,
             last_scan=last_scan,
             recent_events=recent_events,
             **metrics,
@@ -51,23 +51,48 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
 
 
 @router.get("/unknown", response_class=HTMLResponse)
-def unknown_devices(request: Request, db: Session = Depends(get_db)):
-    devices = (
-        db.query(Device)
-        .filter(Device.status == "unknown")
-        .order_by(Device.last_seen_at.desc())
-        .all()
-    )
+def unknown_devices(
+    request: Request,
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    page, page_size = clamp_pagination(page, page_size)
+    query = db.query(Device).filter(Device.status == "unknown").order_by(Device.last_seen_at.desc())
+    result = paginate(query, page, page_size)
     return templates.TemplateResponse(
-        request=request, name="unknown.html", context=template_context(db, request, devices=devices)
+        request=request,
+        name="unknown.html",
+        context=template_context(
+            db,
+            request,
+            devices=result.items,
+            pagination=result,
+            list_path="/unknown",
+        ),
     )
 
 
 @router.get("/devices", response_class=HTMLResponse)
-def device_inventory(request: Request, db: Session = Depends(get_db)):
-    devices = db.query(Device).order_by(Device.last_seen_at.desc()).all()
+def device_inventory(
+    request: Request,
+    db: Session = Depends(get_db),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    page, page_size = clamp_pagination(page, page_size)
+    query = db.query(Device).order_by(Device.last_seen_at.desc())
+    result = paginate(query, page, page_size)
     return templates.TemplateResponse(
-        request=request, name="devices.html", context=template_context(db, request, devices=devices)
+        request=request,
+        name="devices.html",
+        context=template_context(
+            db,
+            request,
+            devices=result.items,
+            pagination=result,
+            list_path="/devices",
+        ),
     )
 
 
@@ -170,21 +195,21 @@ def htmx_device_actions(request: Request, device_id: int, db: Session = Depends(
 # HTMX actions for simple server-rendered flows
 @router.post("/htmx/devices/{device_id}/trust")
 def htmx_trust(request: Request, device_id: int, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if device:
-        device.status = "trusted"
-        log_action(db, device, "trust", {})
-        db.commit()
+    try:
+        DeviceService(db, request_context_from_request(request)).trust(device_id)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Device not found") from exc
+    db.commit()
     return HTMLResponse("")
 
 
 @router.post("/htmx/devices/{device_id}/ignore")
 def htmx_ignore(request: Request, device_id: int, db: Session = Depends(get_db)):
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if device:
-        device.status = "ignored"
-        log_action(db, device, "ignore", {})
-        db.commit()
+    try:
+        DeviceService(db, request_context_from_request(request)).ignore(device_id)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Device not found") from exc
+    db.commit()
     return HTMLResponse("")
 
 
@@ -192,10 +217,18 @@ def htmx_ignore(request: Request, device_id: int, db: Session = Depends(get_db))
 def htmx_rename(
     request: Request, device_id: int, display_name: str = Form(...), db: Session = Depends(get_db)
 ):
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if device:
-        old_name = device.display_name
-        device.display_name = display_name
-        log_action(db, device, "rename", {"old_name": old_name, "new_name": display_name})
-        db.commit()
-    return HTMLResponse(f"<span id='name-{device_id}'>{display_name}</span>")
+    from app.schemas import RenameRequest
+
+    try:
+        name = RenameRequest(display_name=display_name).display_name
+        DeviceService(db, request_context_from_request(request)).rename(device_id, name)
+    except DeviceNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Device not found") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="Invalid display name") from exc
+    db.commit()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/device_name.html",
+        context={"request": request, "device_id": device_id, "display_name": name},
+    )

@@ -38,6 +38,21 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check app tests
 
+      - name: Audit dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project -o /tmp/requirements-audit.txt
+          uv run --with pip-audit pip-audit -r /tmp/requirements-audit.txt
+
+      - name: Alembic upgrade head
+        run: |
+          mkdir -p /tmp/nw-migrate
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci.db uv run alembic upgrade head
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci2.db uv run alembic upgrade 84d6a692d6a4
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci2.db uv run alembic upgrade head
+
+      - name: Semgrep
+        run: uvx --from semgrep==1.110.0 semgrep scan --config p/owasp-top-ten --config p/python --error --quiet app
+
       - name: Pytest
         run: uv run pytest
 
@@ -108,6 +123,6 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Run zizmor
-        run: uvx zizmor --persona pedantic .github/workflows
+        run: uvx zizmor@1.9.0 --persona pedantic .github/workflows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -6,6 +6,11 @@
     </div>
 
     <div class="glass-panel rounded-xl overflow-hidden">
+        {% if pagination %}
+        <div class="px-4 py-2 border-b border-outline text-xs text-on-surface-variant">
+            Showing {{ devices|length }} of {{ pagination.total }} devices
+        </div>
+        {% endif %}
         <!-- Desktop / tablet header -->
         <div class="hidden md:grid grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] gap-4 px-4 py-3 border-b border-outline bg-surface-variant/30 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
             <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="name">
@@ -129,63 +134,11 @@
             <div class="p-8 text-center text-on-surface-variant italic">No devices found.</div>
             {% endfor %}
         </div>
+        {% include "partials/pagination.html" %}
     </div>
 </div>
 
 {% if devices %}
-<script>
-(function () {
-    const tbody = document.getElementById('inventory-tbody');
-    const headers = document.querySelectorAll('.sortable-th');
-    let currentKey = null;
-    let currentDir = 'asc';
-
-    function getSortValue(row, key) {
-        const raw = row.dataset[key] || '';
-        if (key === 'satisfaction' || key === 'bandwidth') {
-            const n = parseFloat(raw);
-            return Number.isFinite(n) ? n : -Infinity;
-        }
-        return raw.toLowerCase();
-    }
-
-    function updateIndicators(activeKey, dir) {
-        headers.forEach((btn) => {
-            const ind = btn.querySelector('.sort-indicator');
-            if (!ind) return;
-            if (btn.dataset.sortKey === activeKey) {
-                ind.textContent = dir === 'asc' ? 'arrow_upward' : 'arrow_downward';
-                ind.classList.remove('opacity-40');
-            } else {
-                ind.textContent = 'unfold_more';
-                ind.classList.add('opacity-40');
-            }
-        });
-    }
-
-    headers.forEach((btn) => {
-        btn.addEventListener('click', () => {
-            const key = btn.dataset.sortKey;
-            if (currentKey === key) {
-                currentDir = currentDir === 'asc' ? 'desc' : 'asc';
-            } else {
-                currentKey = key;
-                currentDir = 'asc';
-            }
-            const rows = Array.from(tbody.querySelectorAll('.inventory-row'));
-            rows.sort((a, b) => {
-                const av = getSortValue(a, key);
-                const bv = getSortValue(b, key);
-                let cmp = 0;
-                if (av < bv) cmp = -1;
-                else if (av > bv) cmp = 1;
-                return currentDir === 'asc' ? cmp : -cmp;
-            });
-            rows.forEach((r) => tbody.appendChild(r));
-            updateIndicators(currentKey, currentDir);
-        });
-    });
-})();
-</script>
+<script src="/static/js/devices-inventory.js?v=1" defer nonce="{{ csp_nonce|default('') }}"></script>
 {% endif %}
 {% endblock %}

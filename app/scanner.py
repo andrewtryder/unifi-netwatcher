@@ -1,4 +1,3 @@
-import json
 import logging
 import threading
 from dataclasses import dataclass
@@ -7,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import utcnow
 from app.mac import normalize_mac
 from app.models import (
     Device,
@@ -160,10 +160,35 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
         for channel in channels:
             provider = PROVIDERS.get(channel.type)
             if not provider:
+                db.add(
+                    NotificationDelivery(
+                        event_id=queued_event.id,
+                        channel_id=channel.id,
+                        success=False,
+                        status_code=None,
+                        response=None,
+                        error=f"Unknown provider type: {channel.type}",
+                    )
+                )
                 continue
 
-            config = json.loads(channel.config_json)
-            success, status_code, response, error = provider.send(intent.message, config)
+            try:
+                from app.security.crypto_migrate import load_channel_config
+
+                config = load_channel_config(channel)
+                if not isinstance(config, dict):
+                    raise ValueError("Invalid channel configuration")
+                if not provider.validate_config(config):
+                    raise ValueError("Invalid channel configuration")
+                success, status_code, response, error = provider.send(intent.message, config)
+            except Exception as exc:
+                logger.warning(
+                    "Notification channel %s failed for device %s: %s",
+                    channel.id,
+                    intent.device_id,
+                    exc,
+                )
+                success, status_code, response, error = False, 0, "", str(exc)
 
             delivery = NotificationDelivery(
                 event_id=queued_event.id,
@@ -236,7 +261,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         db.commit()
         return {"success": False, "message": message, "devices_processed": 0}
 
-    now = datetime.utcnow()
+    now = utcnow()
 
     # Normalize MACs and prepare batch lookups
     prepared: list[tuple[str, dict]] = []
@@ -318,7 +343,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
                 site=site,
                 ssid=ssid,
                 ap_mac=ap_mac,
-                raw_json=json.dumps(c),
+                raw_json=c,
                 seen_at=now,
             )
         )

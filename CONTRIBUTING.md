@@ -29,6 +29,9 @@ cp .env.example .env
 uv sync
 npm ci && npm run build:css
 
+# Apply DB migrations before starting the app (Docker does this in the entrypoint)
+uv run alembic upgrade head
+
 # optional: install git hooks
 uv run pre-commit install
 

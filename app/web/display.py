@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.db import utcnow
 from app.models import Device, Setting
 from app.unifi.band import band_label, connection_mix_key
 
@@ -138,7 +139,7 @@ def connection_subtitle(device: Device) -> str:
 
 def online_devices(db: Session, now: datetime | None = None) -> list[Device]:
     """Devices seen within 2× the active scan interval (not the all-time inventory count)."""
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     interval, _ = resolve_scan_interval(db)
     cutoff = now - timedelta(seconds=max(interval, 1) * 2)
     return (

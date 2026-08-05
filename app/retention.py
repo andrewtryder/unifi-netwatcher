@@ -8,19 +8,23 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from app.activity_log import record_event
+from app.db import utcnow
 from app.models import Event, NotificationDelivery, Observation
 from app.web.display import resolve_event_retention, resolve_observation_retention
 
 logger = logging.getLogger(__name__)
+
+RETENTION_DELETE_BATCH_SIZE = 500
 
 
 def run_retention(db: Session, *, now: datetime | None = None) -> dict:
     """Delete observations/events older than configured retention windows.
 
     ``0`` days disables pruning for that table. Notification deliveries for
-    pruned events are removed first to satisfy the foreign key.
+    pruned events are removed first to satisfy the foreign key. Deletes run in
+    fixed-size batches so large tables never materialize a full ID list.
     """
-    now = now or datetime.utcnow()
+    now = now or utcnow()
     obs_days, obs_source = resolve_observation_retention(db)
     event_days, event_source = resolve_event_retention(db)
 
@@ -30,27 +34,45 @@ def run_retention(db: Session, *, now: datetime | None = None) -> dict:
 
     if obs_days > 0:
         cutoff = now - timedelta(days=obs_days)
-        observations_deleted = (
-            db.query(Observation)
-            .filter(Observation.seen_at < cutoff)
-            .delete(synchronize_session=False)
-        )
+        while True:
+            batch_ids = [
+                row[0]
+                for row in (
+                    db.query(Observation.id)
+                    .filter(Observation.seen_at < cutoff)
+                    .limit(RETENTION_DELETE_BATCH_SIZE)
+                    .all()
+                )
+            ]
+            if not batch_ids:
+                break
+            observations_deleted += (
+                db.query(Observation)
+                .filter(Observation.id.in_(batch_ids))
+                .delete(synchronize_session=False)
+            )
 
     if event_days > 0:
         cutoff = now - timedelta(days=event_days)
-        old_event_ids = [
-            row[0] for row in db.query(Event.id).filter(Event.created_at < cutoff).all()
-        ]
-        if old_event_ids:
-            deliveries_deleted = (
+        while True:
+            batch_ids = [
+                row[0]
+                for row in (
+                    db.query(Event.id)
+                    .filter(Event.created_at < cutoff)
+                    .limit(RETENTION_DELETE_BATCH_SIZE)
+                    .all()
+                )
+            ]
+            if not batch_ids:
+                break
+            deliveries_deleted += (
                 db.query(NotificationDelivery)
-                .filter(NotificationDelivery.event_id.in_(old_event_ids))
+                .filter(NotificationDelivery.event_id.in_(batch_ids))
                 .delete(synchronize_session=False)
             )
-            events_deleted = (
-                db.query(Event)
-                .filter(Event.id.in_(old_event_ids))
-                .delete(synchronize_session=False)
+            events_deleted += (
+                db.query(Event).filter(Event.id.in_(batch_ids)).delete(synchronize_session=False)
             )
 
     message = (

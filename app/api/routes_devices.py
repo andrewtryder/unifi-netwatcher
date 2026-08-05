@@ -1,185 +1,127 @@
-import json
-from datetime import datetime
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
-from app.activity_log import record_event
 from app.config import settings
 from app.db import get_db
-from app.models import AuditLog, Device, Event, NotificationDelivery, Observation
 from app.schemas import BulkDeviceIdsRequest, NotesRequest, RenameRequest
-from app.unifi.client import get_unifi_client
+from app.services.context import request_context_from_request
+from app.services.devices import (
+    DeviceActionError,
+    DeviceNotFoundError,
+    DeviceService,
+    log_action,
+)
 from app.web.context import template_context
 from app.web.templates_env import templates
 
 router = APIRouter()
 
+# Re-export for callers that historically imported log_action from this module
+__all__ = ["router", "log_action", "get_device_or_404"]
+
 
 def get_device_or_404(db: Session, device_id: int):
+    from app.models import Device
+
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
 
-def log_action(db: Session, device: Device, action: str, details: dict):
-    # Log to AuditLog
-    audit = AuditLog(
-        actor="system",  # placeholder until auth is implemented
-        action=action,
-        target_type="device",
-        target_id=str(device.id),
-        details_json=json.dumps(details),
-    )
-    db.add(audit)
+def _service(request: Request, db: Session) -> DeviceService:
+    return DeviceService(db, request_context_from_request(request))
 
-    # Log to Event
-    event_type = action
-    if action == "trust":
-        event_type = "trusted"
-    elif action == "ignore":
-        event_type = "ignored"
-    elif action == "rename":
-        event_type = "renamed"
-    elif action == "notes":
-        event_type = "note_added"
 
-    event = Event(
-        device_id=device.id,
-        event_type=event_type,
-        severity="info",
-        message=f"Device {device.mac} {action}: {details}",
-    )
-    db.add(event)
+def _map_not_found(exc: DeviceNotFoundError) -> HTTPException:
+    return HTTPException(status_code=404, detail="Device not found")
 
 
 @router.post("/bulk/trust")
-def bulk_trust(req: BulkDeviceIdsRequest, db: Session = Depends(get_db)):
-    updated = 0
-    for device_id in req.device_ids:
-        device = db.query(Device).filter(Device.id == device_id).first()
-        if not device:
-            continue
-        previous_status = device.status
-        device.status = "trusted"
-        device.updated_at = datetime.utcnow()
-        log_action(db, device, "trust", {"previous_status": previous_status, "bulk": True})
-        updated += 1
+def bulk_trust(request: Request, req: BulkDeviceIdsRequest, db: Session = Depends(get_db)):
+    updated = _service(request, db).bulk_trust(req.device_ids)
     db.commit()
     return {"status": "success", "updated": updated}
 
 
 @router.post("/bulk/ignore")
-def bulk_ignore(req: BulkDeviceIdsRequest, db: Session = Depends(get_db)):
-    updated = 0
-    for device_id in req.device_ids:
-        device = db.query(Device).filter(Device.id == device_id).first()
-        if not device:
-            continue
-        previous_status = device.status
-        device.status = "ignored"
-        device.updated_at = datetime.utcnow()
-        log_action(db, device, "ignore", {"previous_status": previous_status, "bulk": True})
-        updated += 1
+def bulk_ignore(request: Request, req: BulkDeviceIdsRequest, db: Session = Depends(get_db)):
+    updated = _service(request, db).bulk_ignore(req.device_ids)
     db.commit()
     return {"status": "success", "updated": updated}
 
 
 @router.post("/{device_id}/trust")
-def trust_device(device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    previous_status = device.status
-    device.status = "trusted"
-    device.updated_at = datetime.utcnow()
-    log_action(db, device, "trust", {"previous_status": previous_status})
+def trust_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        device = _service(request, db).trust(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
     return {"status": "success", "device_id": device.id}
 
 
 @router.post("/{device_id}/ignore")
-def ignore_device(device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    previous_status = device.status
-    device.status = "ignored"
-    device.updated_at = datetime.utcnow()
-    log_action(db, device, "ignore", {"previous_status": previous_status})
+def ignore_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        device = _service(request, db).ignore(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
     return {"status": "success", "device_id": device.id}
 
 
 @router.post("/{device_id}/reset")
-def reset_device(device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    previous_status = device.status
-    device.status = "unknown"
-    device.updated_at = datetime.utcnow()
-    log_action(db, device, "reset", {"previous_status": previous_status})
+def reset_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        device = _service(request, db).reset(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
     return {"status": "success", "device_id": device.id}
 
 
 @router.post("/{device_id}/delete")
-def delete_device(device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    mac = device.mac
-
-    record_event(
-        db,
-        "deleted",
-        f"Device deleted: {mac}",
-        metadata={"mac": mac, "status": device.status, "device_id": device.id},
-    )
-
-    event_ids = [e.id for e in db.query(Event).filter(Event.device_id == device.id).all()]
-    if event_ids:
-        db.query(NotificationDelivery).filter(NotificationDelivery.event_id.in_(event_ids)).delete(
-            synchronize_session=False
-        )
-    db.query(Observation).filter(Observation.device_id == device.id).delete(
-        synchronize_session=False
-    )
-    db.query(Event).filter(Event.device_id == device.id).delete(synchronize_session=False)
-
-    db.add(
-        AuditLog(
-            actor="system",
-            action="delete",
-            target_type="device",
-            target_id=str(device.id),
-            details_json=json.dumps({"mac": mac, "status": device.status}),
-        )
-    )
-    db.delete(device)
+def delete_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        deleted_id, mac = _service(request, db).delete(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
-    return {"status": "success", "deleted_device_id": device_id, "mac": mac}
+    return {"status": "success", "deleted_device_id": deleted_id, "mac": mac}
 
 
 @router.post("/{device_id}/rename")
-def rename_device(device_id: int, req: RenameRequest, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    old_name = device.display_name
-    device.display_name = req.display_name
-    device.updated_at = datetime.utcnow()
-    log_action(db, device, "rename", {"old_name": old_name, "new_name": req.display_name})
+def rename_device(
+    request: Request, device_id: int, req: RenameRequest, db: Session = Depends(get_db)
+):
+    try:
+        device = _service(request, db).rename(device_id, req.display_name)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
     return {"status": "success", "device_id": device.id}
 
 
 @router.post("/{device_id}/notes")
-def update_device_notes(device_id: int, req: NotesRequest, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-    device.notes = req.notes
-    device.updated_at = datetime.utcnow()
-    log_action(db, device, "notes", {"notes_length": len(req.notes)})
+def update_device_notes(
+    request: Request, device_id: int, req: NotesRequest, db: Session = Depends(get_db)
+):
+    try:
+        device = _service(request, db).notes(device_id, req.notes)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     db.commit()
     return {"status": "success", "device_id": device.id}
 
 
 @router.get("/htmx/{device_id}/block_modal")
 def block_modal(request: Request, device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
+    try:
+        device = _service(request, db).get_or_raise(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
     return templates.TemplateResponse(
         request=request,
         name="partials/block_modal.html",
@@ -193,43 +135,37 @@ def block_modal(request: Request, device_id: int, db: Session = Depends(get_db))
 
 @router.post("/htmx/{device_id}/block")
 def block_device_action(request: Request, device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-
-    client = get_unifi_client()
-    success = client.block_client(device.mac)
-
-    if success:
-        device.status = "blocked"
-        device.updated_at = datetime.utcnow()
-        log_action(db, device, "blocked", {"dry_run": settings.UNIFI_DRY_RUN_BLOCKS})
-        db.commit()
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/block_success.html",
-            context=template_context(db, request, device=device),
-        )
-    else:
+    try:
+        device = _service(request, db).block(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
+    except DeviceActionError:
         return HTMLResponse(
-            "<script>alert('Failed to execute block on controller.'); document.getElementById('modal-container').remove();</script>"
+            "<div class='p-4 text-error text-sm'>Failed to execute block on controller.</div>",
+            status_code=502,
         )
+    db.commit()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/block_success.html",
+        context=template_context(db, request, device=device),
+    )
 
 
 @router.post("/htmx/{device_id}/unblock")
 def unblock_device_action(request: Request, device_id: int, db: Session = Depends(get_db)):
-    device = get_device_or_404(db, device_id)
-
-    client = get_unifi_client()
-    success = client.unblock_client(device.mac)
-
-    if success:
-        device.status = "unknown"
-        device.updated_at = datetime.utcnow()
-        log_action(db, device, "unblocked", {"dry_run": settings.UNIFI_DRY_RUN_BLOCKS})
-        db.commit()
-        return templates.TemplateResponse(
-            request=request,
-            name="partials/block_success.html",
-            context=template_context(db, request, device=device),
+    try:
+        device = _service(request, db).unblock(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
+    except DeviceActionError:
+        return HTMLResponse(
+            "<div class='p-4 text-error text-sm'>Failed to execute unblock on controller.</div>",
+            status_code=502,
         )
-    else:
-        return HTMLResponse("<script>alert('Failed to execute unblock on controller.');</script>")
+    db.commit()
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/block_success.html",
+        context=template_context(db, request, device=device),
+    )

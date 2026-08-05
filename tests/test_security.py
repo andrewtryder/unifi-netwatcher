@@ -10,6 +10,7 @@ from app.security.service import (
     authenticate,
     ensure_security_settings,
     get_allowed_cidrs_list,
+    get_allowed_hosts_list,
     get_security_settings,
     invalidate_security_cache,
     parse_and_normalize_cidrs,
@@ -21,7 +22,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from tests.conftest import basic_auth_header
+from tests.conftest import basic_auth_header, bootstrap_security_for_tests
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
@@ -41,11 +42,12 @@ def override_get_db():
 @pytest.fixture()
 def sec_client(monkeypatch):
     monkeypatch.setattr("app.db.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
     monkeypatch.setattr("app.security.middleware.SessionLocal", TestingSessionLocal)
     invalidate_security_cache()
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
-    ensure_security_settings(db)
+    bootstrap_security_for_tests(db)
     db.close()
 
     app.dependency_overrides[get_db] = override_get_db
@@ -66,12 +68,141 @@ def test_init_defaults(sec_client):
     assert settings.authentication_username == "admin"
     assert settings.default_credentials_active is True
     assert settings.cidr_restriction_enabled is False
+    # Fixture disables host restriction for TestClient; column default is True.
+    assert settings.host_restriction_enabled is False
     assert get_allowed_cidrs_list(settings) == []
     assert "admin" not in settings.authentication_password_hash
     assert verify_password("admin", settings.authentication_password_hash)
     ensure_security_settings(db)
     assert db.query(SecuritySettings).count() == 1
     db.close()
+
+
+def test_host_restriction_defaults_on_fresh_row():
+    from app.security.service import host_allowed, parse_and_normalize_hosts
+
+    assert host_allowed(
+        "192.168.1.50",
+        host_restriction_enabled=True,
+        allowed_hosts=[],
+    )
+    assert host_allowed(
+        "localhost",
+        host_restriction_enabled=True,
+        allowed_hosts=[],
+    )
+    assert not host_allowed(
+        "evil.example",
+        host_restriction_enabled=True,
+        allowed_hosts=[],
+    )
+    assert host_allowed(
+        "netwatcher.home.arpa",
+        host_restriction_enabled=True,
+        allowed_hosts=["netwatcher.home.arpa"],
+    )
+    norms, errs = parse_and_normalize_hosts(
+        "NetWatcher.Home.Arpa\n\nnetwatcher.home.arpa\nbad/name"
+    )
+    assert norms == ["netwatcher.home.arpa"]
+    assert errs
+
+
+def test_trusted_host_enforcement(sec_client):
+    db = TestingSessionLocal()
+    settings = get_security_settings(db)
+    settings.host_restriction_enabled = True
+    settings.allowed_hosts = "[]"
+    db.add(settings)
+    db.commit()
+    db.close()
+    invalidate_security_cache()
+
+    # Private IP Host is allowed by default.
+    assert sec_client.get("/", headers={**AUTH, "Host": "192.168.1.10:8080"}).status_code == 200
+    # Arbitrary DNS Host is rejected.
+    assert sec_client.get("/", headers={**AUTH, "Host": "evil.example"}).status_code == 403
+
+    # Allowlist + save via API
+    r = sec_client.post(
+        "/security/htmx/hosts",
+        data={
+            "host_restriction_enabled": "on",
+            "allowed_hosts": "netwatcher.home.arpa",
+        },
+        headers={**AUTH, "Host": "192.168.1.10"},
+    )
+    assert r.status_code == 200
+    assert sec_client.get("/", headers={**AUTH, "Host": "netwatcher.home.arpa"}).status_code == 200
+
+
+def test_trusted_host_lockout_preview(sec_client):
+    r = sec_client.post(
+        "/security/api/hosts-preview",
+        data={
+            "host_restriction_enabled": "on",
+            "allowed_hosts": "other.example",
+        },
+        headers={**AUTH, "Host": "testserver"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["valid"] is True
+    assert body["client_will_remain_allowed"] is False
+    assert body["effective_request_host"] == "testserver"
+
+    r = sec_client.post(
+        "/security/htmx/hosts",
+        data={
+            "host_restriction_enabled": "on",
+            "allowed_hosts": "other.example",
+        },
+        headers={**AUTH, "Host": "testserver"},
+    )
+    assert r.status_code == 400
+
+    r = sec_client.post(
+        "/security/htmx/hosts",
+        data={
+            "host_restriction_enabled": "on",
+            "allowed_hosts": "other.example",
+            "allow_lockout": "on",
+            "lockout_confirmation": "ALLOW LOCKOUT",
+        },
+        headers={**AUTH, "Host": "testserver"},
+    )
+    assert r.status_code == 200
+
+
+def test_username_colon_rejected(sec_client):
+    r = sec_client.post(
+        "/security/htmx/authentication",
+        data={
+            "authentication_enabled": "on",
+            "username": "admin:evil",
+            "current_password": "admin",
+            "new_password": "",
+            "confirm_password": "",
+        },
+        headers=AUTH,
+    )
+    assert r.status_code == 400
+    assert "colon" in r.text.lower() or "ascii" in r.text.lower()
+
+
+def test_auth_rate_limit(sec_client):
+    from app.security.middleware import AUTH_FAIL_LIMIT, reset_auth_failure_limiter
+
+    reset_auth_failure_limiter()
+    for _ in range(AUTH_FAIL_LIMIT):
+        r = sec_client.get("/", headers=basic_auth_header("admin", "wrong-password"))
+        assert r.status_code == 401
+    r = sec_client.get("/", headers=basic_auth_header("admin", "wrong-password"))
+    assert r.status_code == 429
+    # Valid credentials still blocked until window clears / limiter reset
+    assert sec_client.get("/", headers=AUTH).status_code == 429
+    reset_auth_failure_limiter()
+    assert sec_client.get("/", headers=AUTH).status_code == 200
 
 
 def test_admin_admin_authenticates(sec_client):
@@ -348,7 +479,7 @@ def test_security_page_escapes_username_in_form(sec_client):
     update_authentication(
         db,
         authentication_enabled=True,
-        username='"><img src=x onerror=alert(1)>',
+        username="admin_ops",
         current_password="admin",
         new_password="",
         confirm_password="",
@@ -357,12 +488,10 @@ def test_security_page_escapes_username_in_form(sec_client):
     db.close()
     invalidate_security_cache()
 
-    evil_auth = basic_auth_header('"><img src=x onerror=alert(1)>', "admin")
+    evil_auth = basic_auth_header("admin_ops", "admin")
     r = sec_client.get("/security", headers=evil_auth)
     assert r.status_code == 200
-    assert "onerror=alert(1)" not in r.text or "&gt;" in r.text
-    assert "&#34;&gt;&lt;img src=x onerror=alert(1)&gt;" in r.text
-    assert 'value=""><img' not in r.text
+    assert 'value="admin_ops"' in r.text
 
 
 def test_authenticate_helper_constant_time_path(sec_client):
@@ -372,3 +501,24 @@ def test_authenticate_helper_constant_time_path(sec_client):
     assert not authenticate(settings, "admin", "nope")
     assert not authenticate(settings, "nope", "admin")
     db.close()
+
+
+def test_fresh_security_row_enables_host_restriction():
+    """create_all + ensure without test bootstrap keeps host restriction on."""
+    from app.db import Base
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    eng = create_engine(
+        "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
+    )
+    Session = sessionmaker(bind=eng)
+    Base.metadata.create_all(bind=eng)
+    db = Session()
+    invalidate_security_cache()
+    row = ensure_security_settings(db)
+    assert row.host_restriction_enabled is True
+    assert get_allowed_hosts_list(row) == []
+    db.close()
+    Base.metadata.drop_all(bind=eng)

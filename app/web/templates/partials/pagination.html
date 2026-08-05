@@ -1,0 +1,22 @@
+{% if pagination and pagination.total_pages > 1 %}
+<nav class="flex items-center justify-between gap-4 px-4 py-3 border-t border-outline text-sm text-on-surface-variant" aria-label="Pagination">
+    <div>
+        Page {{ pagination.page }} of {{ pagination.total_pages }}
+        <span class="text-outline">({{ pagination.total }} total)</span>
+    </div>
+    <div class="flex items-center gap-2">
+        {% if pagination.has_prev %}
+        <a href="{{ list_path }}?page={{ pagination.page - 1 }}&page_size={{ pagination.page_size }}"
+           class="px-3 py-1.5 rounded-lg border border-outline hover:bg-surface-variant/40 transition-colors">Previous</a>
+        {% else %}
+        <span class="px-3 py-1.5 rounded-lg border border-outline opacity-40 cursor-not-allowed">Previous</span>
+        {% endif %}
+        {% if pagination.has_next %}
+        <a href="{{ list_path }}?page={{ pagination.page + 1 }}&page_size={{ pagination.page_size }}"
+           class="px-3 py-1.5 rounded-lg border border-outline hover:bg-surface-variant/40 transition-colors">Next</a>
+        {% else %}
+        <span class="px-3 py-1.5 rounded-lg border border-outline opacity-40 cursor-not-allowed">Next</span>
+        {% endif %}
+    </div>
+</nav>
+{% endif %}

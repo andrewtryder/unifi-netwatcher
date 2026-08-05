@@ -49,7 +49,7 @@ def _seed(db, *, now: datetime):
         type="webhook",
         name="hook",
         enabled=True,
-        config_json='{"url":"http://example.test"}',
+        config_json={"url": "https://hooks.example.com/hook"},
     )
     db.add(channel)
     db.flush()
@@ -158,3 +158,39 @@ def test_run_retention_uses_stored_override(db_session, monkeypatch):
     assert result["event_retention_days"] == 90
     assert result["observations_deleted"] == 1
     assert result["events_deleted"] == 1
+
+
+def test_run_retention_batches_many_events(db_session, monkeypatch):
+    from app.config import settings
+    from app.retention import RETENTION_DELETE_BATCH_SIZE
+
+    monkeypatch.setattr(settings, "OBSERVATION_RETENTION_DAYS", 0)
+    monkeypatch.setattr(settings, "EVENT_RETENTION_DAYS", 90)
+
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    device = Device(
+        mac="aa:bb:cc:dd:ee:99",
+        status="unknown",
+        first_seen_at=now - timedelta(days=200),
+        last_seen_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    db_session.add(device)
+    db_session.flush()
+
+    batch = RETENTION_DELETE_BATCH_SIZE + 25
+    for i in range(batch):
+        db_session.add(
+            Event(
+                device_id=device.id,
+                event_type="discovered",
+                message=f"old-{i}",
+                created_at=now - timedelta(days=100),
+            )
+        )
+    db_session.commit()
+
+    result = run_retention(db_session, now=now)
+    assert result["events_deleted"] == batch
+    assert db_session.query(Event).filter(Event.event_type == "discovered").count() == 0

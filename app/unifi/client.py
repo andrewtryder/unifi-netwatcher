@@ -15,8 +15,8 @@ class UnifiClient:
         self.base_url = settings.UNIFI_URL.rstrip("/")
         self.site = settings.UNIFI_SITE
         self.username = settings.UNIFI_USERNAME
-        self.password = settings.UNIFI_PASSWORD
-        self.verify_ssl = settings.UNIFI_VERIFY_SSL
+        self.password = settings.unifi_password()
+        self.verify_ssl = settings.unifi_verify()
         self.timeout = settings.UNIFI_TIMEOUT_SECONDS
         self.mock_mode = settings.UNIFI_MOCK_MODE
         self.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
@@ -118,8 +118,8 @@ def get_unifi_client() -> UnifiClient:
         _shared_client.base_url = settings.UNIFI_URL.rstrip("/")
         _shared_client.site = settings.UNIFI_SITE
         _shared_client.username = settings.UNIFI_USERNAME
-        _shared_client.password = settings.UNIFI_PASSWORD
-        _shared_client.verify_ssl = settings.UNIFI_VERIFY_SSL
+        _shared_client.password = settings.unifi_password()
+        _shared_client.verify_ssl = settings.unifi_verify()
     return _shared_client
 
 
