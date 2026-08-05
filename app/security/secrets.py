@@ -97,7 +97,7 @@ def resolve_fernet(
         # Accept either raw Fernet token (url-safe base64) or arbitrary bytes.
         try:
             return Fernet(file_key.splitlines()[0].strip()), "file"
-        except ValueError, Exception:
+        except Exception:
             return fernet_from_material(file_key), "file"
 
     if not allow_generate:
@@ -108,7 +108,7 @@ def resolve_fernet(
 
     generated = Fernet.generate_key()
     write_key_file(path, generated)
-    logger.info("Generated application secret key at %s (mode 0600)", path)
+    logger.info("Created Fernet key file at %s (mode 0600)", path)
     return Fernet(generated.strip()), "generated"
 
 
