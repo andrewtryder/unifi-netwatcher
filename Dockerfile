@@ -21,8 +21,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.14-slim-bookworm
 WORKDIR /app
-COPY --from=builder /app /app
+
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid app --shell /usr/sbin/nologin --create-home app \
+    && mkdir -p /app/data /app/logs /tmp \
+    && chown -R app:app /app /tmp
+
+COPY --from=builder --chown=app:app /app /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONUNBUFFERED=1
-COPY --from=assets /app/app/web/static/app.css ./app/web/static/app.css
-COPY --from=assets /app/app/web/static/fonts ./app/web/static/fonts
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+COPY --from=assets --chown=app:app /app/app/web/static/app.css ./app/web/static/app.css
+COPY --from=assets --chown=app:app /app/app/web/static/fonts ./app/web/static/fonts
+
+RUN chmod +x /app/scripts/docker-entrypoint.sh
+
+USER app
+EXPOSE 8080
+ENTRYPOINT ["/app/scripts/docker-entrypoint.sh"]

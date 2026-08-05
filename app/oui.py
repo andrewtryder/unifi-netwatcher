@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 
@@ -10,6 +11,9 @@ from app.models import OuiEntry
 logger = logging.getLogger(__name__)
 
 OUI_URL = "https://standards-oui.ieee.org/oui/oui.txt"
+OUI_MIN_ENTRIES = 1_000
+OUI_MAX_ENTRIES = 100_000
+OUI_UPSERT_BATCH_SIZE = 750
 
 
 def is_start(first_line: str, second_line: str) -> bool:
@@ -33,9 +37,6 @@ def parse_oui_data(text: str) -> dict[str, str]:
 
             i += 3
             while i < len(lines) and (i + 1 >= len(lines) or not is_start(lines[i], lines[i + 1])):
-                # Only keep company name, don't keep address
-                # if lines[i] and lines[i].strip():
-                #     owner += f"\n{lines[i].strip()}"
                 i += 1
 
             owner = re.sub(r"[ \t]+", " ", owner)
@@ -45,6 +46,19 @@ def parse_oui_data(text: str) -> dict[str, str]:
         else:
             i += 1
     return result
+
+
+def upsert_oui_entries(db: Session, entries: dict[str, str]) -> None:
+    """Sync batch upsert of OUI rows (run via asyncio.to_thread from async callers)."""
+    rows = [{"mac_prefix": mac_prefix, "vendor": vendor} for mac_prefix, vendor in entries.items()]
+    for start in range(0, len(rows), OUI_UPSERT_BATCH_SIZE):
+        batch = rows[start : start + OUI_UPSERT_BATCH_SIZE]
+        stmt = insert(OuiEntry).values(batch)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["mac_prefix"], set_=dict(vendor=stmt.excluded.vendor)
+        )
+        db.execute(stmt)
+    db.commit()
 
 
 async def update_oui_data(db: Session):
@@ -60,23 +74,22 @@ async def update_oui_data(db: Session):
 
             logger.info("Parsing OUI data...")
             entries = parse_oui_data(text)
-            logger.info(f"Parsed {len(entries)} OUI entries. Updating database...")
+            count = len(entries)
+            if count < OUI_MIN_ENTRIES or count > OUI_MAX_ENTRIES:
+                raise ValueError(
+                    f"OUI entry count {count} outside expected range "
+                    f"[{OUI_MIN_ENTRIES}, {OUI_MAX_ENTRIES}]"
+                )
+            logger.info("Parsed %s OUI entries. Updating database...", count)
 
-            # Using SQLite ON CONFLICT DO UPDATE
-            stmt = insert(OuiEntry).values(
-                [
-                    {"mac_prefix": mac_prefix, "vendor": vendor}
-                    for mac_prefix, vendor in entries.items()
-                ]
-            )
+            # Sessions are not thread-safe; open a fresh session on the same bind.
+            bind = db.get_bind()
 
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["mac_prefix"], set_=dict(vendor=stmt.excluded.vendor)
-            )
+            def _write() -> None:
+                with Session(bind) as thread_db:
+                    upsert_oui_entries(thread_db, entries)
 
-            # Execute in batches if it's too large, but 30k entries should be fine in one go for SQLite
-            db.execute(stmt)
-            db.commit()
+            await asyncio.to_thread(_write)
             logger.info("OUI data update complete.")
 
     except Exception as e:

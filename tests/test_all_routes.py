@@ -5,13 +5,13 @@ import pytest
 from app.db import Base, get_db
 from app.main import app
 from app.models import Device, NotificationChannel, Observation
-from app.security.service import ensure_security_settings, invalidate_security_cache
+from app.security.service import invalidate_security_cache
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from tests.conftest import basic_auth_header
+from tests.conftest import basic_auth_header, bootstrap_security_for_tests
 
 # Use a single test database for everything
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -38,13 +38,15 @@ AUTH = basic_auth_header()
 @pytest.fixture(autouse=True, scope="function")
 def setup_db(monkeypatch):
     monkeypatch.setattr("app.db.SessionLocal", TestingSessionLocal)
+    monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
     monkeypatch.setattr("app.security.middleware.SessionLocal", TestingSessionLocal)
     invalidate_security_cache()
+    app.dependency_overrides[get_db] = override_get_db
 
     Base.metadata.create_all(bind=engine)
     db = TestingSessionLocal()
 
-    ensure_security_settings(db)
+    bootstrap_security_for_tests(db)
 
     device1 = Device(
         id=1,
@@ -67,7 +69,7 @@ def setup_db(monkeypatch):
         type="webhook",
         name="Test Webhook",
         enabled=True,
-        config_json='{"url": "http://test.com"}',
+        config_json={"url": "https://hooks.example.com/hook"},
     )
     observation1 = Observation(
         device_id=1,
@@ -194,8 +196,9 @@ def test_delete_channel():
     assert response.status_code == 200
 
 
+@patch("app.notifications.webhook.resolve_webhook_target")
 @patch("app.notifications.webhook.WebhookProvider.send")
-def test_test_channel(mock_send):
+def test_test_channel(mock_send, mock_resolve):
     mock_send.return_value = (True, 200, "OK", None)
     response = client.post("/api/notifications/htmx/1/test", headers=AUTH)
     assert response.status_code == 200

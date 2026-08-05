@@ -1,5 +1,3 @@
-import json
-
 from sqlalchemy.orm import Session
 
 from app.models import Event
@@ -20,6 +18,6 @@ def record_event(
             event_type=event_type,
             severity=severity,
             message=message,
-            metadata_json=json.dumps(metadata) if metadata else None,
+            metadata_json=metadata,
         )
     )

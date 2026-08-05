@@ -1,16 +1,16 @@
 import csv
 import io
-from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, PlainTextResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.activity_log import record_event
-from app.api.routes_devices import log_action
-from app.db import get_db
+from app.config import settings
+from app.db import get_db, utcnow
 from app.mac import normalize_mac
 from app.models import Device, Setting
+from app.services.devices import log_action
 from app.web.context import template_context
 from app.web.display import (
     EVENT_RETENTION_SETTING_KEY,
@@ -26,6 +26,24 @@ router = APIRouter()
 
 PRESET_INTERVALS = {60, 300, 900, 1800, 3600}
 PRESET_RETENTION_DAYS = {0, 7, 30, 90, 180, 365}
+
+
+def _csv_safe(value: object) -> str:
+    """Neutralize CSV formula injection for spreadsheet clients.
+
+    Checks the first meaningful character after leading whitespace and
+    control characters, while preserving the original value after the
+    protective apostrophe.
+    """
+    text = "" if value is None else str(value)
+    if not text:
+        return text
+    meaningful = text.lstrip(" \t\r\n\v\f\x00")
+    if meaningful and meaningful[0] in ("=", "+", "-", "@", "|", "%"):
+        return f"'{text}"
+    if text[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return f"'{text}"
+    return text
 
 
 def _upsert_setting(db: Session, key: str, value: str) -> None:
@@ -183,12 +201,24 @@ def save_retention(
 async def import_trusted(
     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    content = await file.read()
-    text = content.decode("utf-8")
+    max_bytes = settings.IMPORT_MAX_BYTES
+    max_rows = settings.IMPORT_MAX_ROWS
+    content = await file.read(max_bytes + 1)
+    if len(content) > max_bytes:
+        return HTMLResponse(
+            "<div class='text-error font-bold mt-4'>Import file exceeds the size limit.</div>",
+            status_code=400,
+        )
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return HTMLResponse(
+            "<div class='text-error font-bold mt-4'>Import file must be valid UTF-8 text.</div>",
+            status_code=400,
+        )
 
-    imported_count = 0
-    now = datetime.utcnow()
-
+    # Phase 1: parse and validate the complete input before mutating.
+    records: list[tuple[str, str]] = []
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
@@ -210,19 +240,36 @@ async def import_trusted(
         mac = normalize_mac(raw_mac)
         if not mac:
             continue
+        records.append((mac, note))
+        if len(records) > max_rows:
+            return HTMLResponse(
+                f"<div class='text-error font-bold mt-4'>Import exceeds the {max_rows} row limit.</div>",
+                status_code=400,
+            )
 
-        device = db.query(Device).filter(Device.mac == mac).first()
+    # Phase 2: apply validated records in one transaction with batched MAC lookup.
+    imported_count = 0
+    now = utcnow()
+    macs = [mac for mac, _ in records]
+    existing = (
+        {d.mac: d for d in db.query(Device).filter(Device.mac.in_(macs)).all()} if macs else {}
+    )
+
+    for mac, note in records:
+        device = existing.get(mac)
         if not device:
             device = Device(
                 mac=mac, status="trusted", first_seen_at=now, last_seen_at=now, display_name=note
             )
             db.add(device)
             db.flush()
+            existing[mac] = device
             log_action(db, device, "trust", {"source": "trusted.csv_import"})
             imported_count += 1
         else:
             if device.status != "trusted":
                 device.status = "trusted"
+                device.updated_at = now
                 log_action(db, device, "trust", {"source": "trusted.csv_import"})
                 imported_count += 1
             if note and not device.display_name:
@@ -249,46 +296,51 @@ def export_trusted(db: Session = Depends(get_db)):
 
 @router.get("/export/csv")
 def export_csv(db: Session = Depends(get_db)):
-    devices = db.query(Device).all()
+    header = [
+        "ID",
+        "MAC",
+        "Status",
+        "IP",
+        "Hostname",
+        "Display Name",
+        "Vendor",
+        "Site",
+        "SSID",
+        "First Seen",
+        "Last Seen",
+    ]
 
-    output = io.StringIO()
-    writer = csv.writer(output)
-    writer.writerow(
-        [
-            "ID",
-            "MAC",
-            "Status",
-            "IP",
-            "Hostname",
-            "Display Name",
-            "Vendor",
-            "Site",
-            "SSID",
-            "First Seen",
-            "Last Seen",
-        ]
-    )
+    def row_iter():
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(header)
+        yield buffer.getvalue()
+        buffer.seek(0)
+        buffer.truncate(0)
 
-    for d in devices:
-        writer.writerow(
-            [
-                d.id,
-                d.mac,
-                d.status,
-                d.ip,
-                d.hostname,
-                d.display_name,
-                d.vendor,
-                d.last_site,
-                d.last_ssid,
-                d.first_seen_at.isoformat() if d.first_seen_at else "",
-                d.last_seen_at.isoformat() if d.last_seen_at else "",
-            ]
-        )
+        query = db.query(Device).order_by(Device.id).yield_per(500)
+        for d in query:
+            writer.writerow(
+                [
+                    d.id,
+                    _csv_safe(d.mac),
+                    _csv_safe(d.status),
+                    _csv_safe(d.ip),
+                    _csv_safe(d.hostname),
+                    _csv_safe(d.display_name),
+                    _csv_safe(d.vendor),
+                    _csv_safe(d.last_site),
+                    _csv_safe(d.last_ssid),
+                    _csv_safe(d.first_seen_at.isoformat() if d.first_seen_at else ""),
+                    _csv_safe(d.last_seen_at.isoformat() if d.last_seen_at else ""),
+                ]
+            )
+            yield buffer.getvalue()
+            buffer.seek(0)
+            buffer.truncate(0)
 
-    output.seek(0)
     return StreamingResponse(
-        iter([output.getvalue()]),
+        row_iter(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=devices.csv"},
     )

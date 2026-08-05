@@ -9,4 +9,11 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
+    tmpfs:
+      - /tmp
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped

@@ -113,7 +113,7 @@ def test_alerts_sent_after_scan_commit(db_session, monkeypatch):
             name="hook",
             type="webhook",
             enabled=True,
-            config_json='{"url": "http://example.test/hook"}',
+            config_json={"url": "https://hooks.example.com/hook"},
         )
     )
     db_session.commit()
@@ -126,10 +126,10 @@ def test_alerts_sent_after_scan_commit(db_session, monkeypatch):
         assert db_session.query(Event).filter(Event.event_type == "scan_finished").count() == 1
         return True, 200, "ok", ""
 
-    monkeypatch.setattr(
-        "app.scanner.PROVIDERS",
-        {"webhook": MagicMock(send=mock_send)},
-    )
+    provider = MagicMock()
+    provider.validate_config.return_value = True
+    provider.send.side_effect = mock_send
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": provider})
 
     result = run_scan(db_session)
     assert result["success"] is True

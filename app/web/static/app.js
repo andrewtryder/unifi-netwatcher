@@ -24,25 +24,54 @@
     });
   }
 
-    async function refreshNav() {
-        try {
-            const response = await fetch("/htmx/nav");
-            if (!response.ok) return;
-            const doc = new DOMParser().parseFromString(await response.text(), "text/html");
-            ["desktop-nav-links", "mobile-nav"].forEach((id) => {
-                const next = doc.getElementById(id);
-                const current = document.getElementById(id);
-                if (next && current) current.replaceWith(next);
-            });
-        } catch (_) {
-            /* ignore */
-        }
+  async function apiFetch(url, options = {}) {
+    const opts = { credentials: "same-origin", ...options };
+    opts.headers = { ...(options.headers || {}) };
+    if (opts.body && !opts.headers["Content-Type"] && !(opts.body instanceof FormData)) {
+      opts.headers["Content-Type"] = "application/json";
     }
+    const response = await fetch(url, opts);
+    if (!response.ok) {
+      let detail = `Request failed (${response.status})`;
+      const contentType = response.headers.get("content-type") || "";
+      try {
+        if (contentType.includes("application/json")) {
+          const data = await response.json();
+          if (data && data.detail) detail = String(data.detail);
+        } else {
+          const text = await response.text();
+          if (text && !text.includes("<script")) detail = text.slice(0, 200);
+        }
+      } catch (_) {
+        /* ignore parse errors */
+      }
+      const err = new Error(detail);
+      err.status = response.status;
+      throw err;
+    }
+    return response;
+  }
+
+  async function refreshNav() {
+    try {
+      const response = await fetch("/htmx/nav", { credentials: "same-origin" });
+      if (!response.ok) return;
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      ["desktop-nav-links", "mobile-nav"].forEach((id) => {
+        const next = doc.getElementById(id);
+        const current = document.getElementById(id);
+        if (next && current) current.replaceWith(next);
+      });
+    } catch (_) {
+      /* ignore */
+    }
+  }
 
   window.NetWatcher = {
     formatRelativeAgo,
     updateRelativeTimes,
     refreshNav,
+    apiFetch,
     removeUnknownRows(deviceIds) {
       deviceIds.forEach((id) => document.getElementById(`row-${id}`)?.remove());
       const tbody = document.getElementById("unknown-devices-tbody");

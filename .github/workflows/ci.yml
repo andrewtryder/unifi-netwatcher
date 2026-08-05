@@ -38,6 +38,26 @@ jobs:
       - name: Ruff format
         run: uv run ruff format --check app tests
 
+      - name: Audit dependencies
+        run: |
+          uv export --frozen --no-dev --no-emit-project -o /tmp/requirements-audit.txt
+          uv run --with pip-audit pip-audit -r /tmp/requirements-audit.txt
+
+      - name: Alembic upgrade head
+        run: |
+          mkdir -p /tmp/nw-migrate
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci.db uv run alembic upgrade head
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci2.db uv run alembic upgrade 84d6a692d6a4
+          DATABASE_URL=sqlite:////tmp/nw-migrate/ci2.db uv run alembic upgrade head
+
+      - name: Semgrep
+        # Official image avoids uvx/semgrep breaking on the runner's default Python (e.g. 3.14).
+        run: |
+          docker run --rm \
+            -v "$PWD:/src:ro" \
+            semgrep/semgrep:1.110.0@sha256:a147965cd455dd773f639b09c53b1428aa2d24f1c3459ca203a8ce84845e8f18 \
+            semgrep scan --config p/owasp-top-ten --config p/python --error --quiet /src/app
+
       - name: Pytest
         run: uv run pytest
 
@@ -108,6 +128,6 @@ jobs:
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
 
       - name: Run zizmor
-        run: uvx zizmor --persona pedantic .github/workflows
+        run: uvx zizmor@1.9.0 --persona pedantic .github/workflows
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

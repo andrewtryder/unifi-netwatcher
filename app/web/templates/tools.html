@@ -203,32 +203,5 @@ de:ad:be:ef:00:01</pre>
     </div>
 </div>
 
-<script>
-(function () {
-    const input = document.getElementById('trusted-import-file');
-    const filename = document.getElementById('trusted-import-filename');
-    if (input && filename) {
-        input.addEventListener('change', () => {
-            filename.textContent = input.files?.[0]?.name || 'No file chosen';
-            filename.classList.toggle('italic', !input.files?.[0]);
-        });
-    }
-
-    function bindCustomToggle(modeId, wrapId) {
-        const mode = document.getElementById(modeId);
-        const customWrap = document.getElementById(wrapId);
-        function syncCustom() {
-            if (!mode || !customWrap) return;
-            customWrap.classList.toggle('hidden', mode.value !== 'custom');
-        }
-        if (mode) {
-            mode.addEventListener('change', syncCustom);
-            syncCustom();
-        }
-    }
-    bindCustomToggle('interval_mode', 'custom-interval-wrap');
-    bindCustomToggle('observation_mode', 'observation-custom-wrap');
-    bindCustomToggle('event_mode', 'event-custom-wrap');
-})();
-</script>
+<script src="/static/js/tools.js?v=1" defer nonce="{{ csp_nonce|default('') }}"></script>
 {% endblock %}

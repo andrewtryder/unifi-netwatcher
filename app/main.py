@@ -2,11 +2,11 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-import alembic.command
-import alembic.config
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from app.api.routes_devices import router as devices_api_router
 from app.api.routes_import_export import router as tools_router
@@ -19,8 +19,12 @@ from app.notifications.http import close_notification_http_client
 from app.oui import update_oui_data
 from app.retention import run_retention
 from app.scanner import run_scan
+from app.security.crypto_migrate import migrate_notification_secrets
+from app.security.csp import CSPMiddleware
 from app.security.middleware import AccessControlMiddleware
+from app.security.models import SecuritySettings
 from app.security.routes import router as security_router
+from app.security.secrets import SecretKeyError, init_app_secrets
 from app.security.service import ensure_security_settings
 from app.unifi.client import close_unifi_client, get_unifi_client
 from app.web.display import (
@@ -87,9 +91,13 @@ def reschedule_scan_job(seconds: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Run alembic migrations on startup
-    alembic_cfg = alembic.config.Config("alembic.ini")
-    alembic.command.upgrade(alembic_cfg, "head")
+    from pathlib import Path
+
+    init_app_secrets(
+        env_secret=settings.app_secret_key(),
+        key_path=Path(settings.APP_SECRET_KEY_PATH),
+        allow_generate=True,
+    )
 
     db = SessionLocal()
     interval = settings.SCAN_INTERVAL_SECONDS
@@ -97,6 +105,11 @@ async def lifespan(app: FastAPI):
     event_days = settings.EVENT_RETENTION_DAYS
     try:
         ensure_security_settings(db)
+        try:
+            migrate_notification_secrets(db)
+        except SecretKeyError:
+            logger.exception("Notification secret migration failed")
+            raise
         interval, source = resolve_scan_interval(db)
         obs_days, obs_source = resolve_observation_retention(db)
         event_days, event_source = resolve_event_retention(db)
@@ -157,6 +170,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="NetWatcher for UniFi", lifespan=lifespan)
 app.add_middleware(AccessControlMiddleware)
+app.add_middleware(CSPMiddleware)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
@@ -177,4 +191,15 @@ def healthz():
 
 @app.get("/readyz")
 def readyz():
+    try:
+        db = SessionLocal()
+        try:
+            db.execute(text("SELECT 1"))
+            if db.query(SecuritySettings).filter(SecuritySettings.id == 1).first() is None:
+                return JSONResponse({"status": "not_ready"}, status_code=503)
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("Readiness check failed")
+        return JSONResponse({"status": "not_ready"}, status_code=503)
     return {"status": "ready"}

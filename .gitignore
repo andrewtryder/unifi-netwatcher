@@ -24,6 +24,7 @@ coverage.xml
 data/*.db
 data/*.sqlite
 data/*.sqlite3
+data/app-secret.key
 logs/*
 !data/.gitkeep
 node_modules/
