@@ -6,85 +6,128 @@
     </div>
 
     <div class="glass-panel rounded-xl overflow-hidden">
-        <div class="overflow-x-auto">
-            <table class="w-full text-left border-collapse" id="inventory-table">
-                <thead>
-                    <tr class="border-b border-outline bg-surface-variant/30">
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="mac">
-                                MAC Address <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="ip">
-                                IP Address <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="hostname">
-                                Hostname <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="vendor">
-                                Vendor <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="status">
-                                Status <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
-                            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors" data-sort-key="last_seen">
-                                Last Seen <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
-                            </button>
-                        </th>
-                        <th class="p-4 text-xs font-medium text-on-surface-variant uppercase tracking-wider text-right">Actions</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-outline" id="inventory-tbody">
-                    {% for device in devices %}
-                    <tr class="hover:bg-surface-variant/20 transition-colors"
-                        data-mac="{{ device.mac }}"
-                        data-ip="{{ device.ip or '' }}"
-                        data-hostname="{{ device.hostname or '' }}"
-                        data-vendor="{{ device.vendor or '' }}"
-                        data-status="{{ device.status }}"
-                        data-last-seen="{{ device.last_seen_at.isoformat() if device.last_seen_at else '' }}">
-                        <td class="p-4 font-mono text-sm">{{ device.mac }}</td>
-                        <td class="p-4 font-mono text-sm text-on-surface-variant">{{ device.ip or '-' }}</td>
-                        <td class="p-4 text-sm">{{ device.hostname or '-' }}</td>
-                        <td class="p-4 text-sm text-on-surface-variant truncate max-w-[150px]">{{ device.vendor or '-' }}</td>
-                        <td class="p-4">
-                            {% if device.status == 'trusted' %}
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">
-                                Trusted
-                            </span>
-                            {% elif device.status == 'ignored' %}
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">
-                                Ignored
-                            </span>
-                            {% else %}
-                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">
-                                Unknown
-                            </span>
+        <!-- Desktop / tablet header -->
+        <div class="hidden md:grid grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] gap-4 px-4 py-3 border-b border-outline bg-surface-variant/30 text-xs font-medium text-on-surface-variant uppercase tracking-wider">
+            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="name">
+                Device <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+            </button>
+            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="connection">
+                Connection <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+            </button>
+            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="satisfaction">
+                Satisfaction <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+            </button>
+            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="bandwidth">
+                Live bandwidth <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+            </button>
+            <button type="button" class="sortable-th flex items-center gap-1 hover:text-primary transition-colors text-left" data-sort-key="status">
+                Status <span class="sort-indicator material-symbols-outlined text-sm opacity-40">unfold_more</span>
+            </button>
+            <div class="text-right">Actions</div>
+        </div>
+
+        <div id="inventory-tbody" class="divide-y divide-outline">
+            {% for device in devices %}
+            {% set down = bytes_r_to_mbps(device.rx_bytes_r) %}
+            {% set up = bytes_r_to_mbps(device.tx_bytes_r) %}
+            {% set subtitle = device_fingerprint_subtitle(device) %}
+            {% set conn = connection_subtitle(device) %}
+            {% set sat_class = satisfaction_color_class(device.satisfaction) %}
+            <div class="inventory-row hover:bg-surface-variant/20 transition-colors p-4"
+                 data-name="{{ device_display_name(device) }}"
+                 data-connection="{{ conn }}"
+                 data-satisfaction="{{ device.satisfaction if device.satisfaction is not none else '' }}"
+                 data-bandwidth="{{ down }}"
+                 data-status="{{ device.status }}"
+                 data-mac="{{ device.mac }}">
+                <!-- Mobile: stacked card -->
+                <div class="md:hidden flex flex-col gap-3">
+                    <div class="flex items-start gap-3">
+                        <span class="material-symbols-outlined text-primary mt-0.5">{{ device_icon(device) }}</span>
+                        <div class="min-w-0 flex-1">
+                            <a href="/devices/{{ device.id }}" class="text-sm font-medium text-on-surface hover:text-primary">{{ device_display_name(device) }}</a>
+                            {% if subtitle %}
+                            <div class="text-xs text-on-surface-variant truncate">{{ subtitle }}</div>
                             {% endif %}
-                        </td>
-                        <td class="p-4 font-mono text-xs text-on-surface-variant">{{ device.last_seen_at.strftime('%Y-%m-%d %H:%M') if device.last_seen_at else '-' }}</td>
-                        <td class="p-4 text-right">
-                            <a href="/devices/{{ device.id }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors">
-                                <span class="material-symbols-outlined text-sm">visibility</span>
-                            </a>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="7" class="p-8 text-center text-on-surface-variant italic">No devices found.</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                            <div class="font-mono text-[11px] text-outline mt-0.5">{{ device.mac }}</div>
+                        </div>
+                        <a href="/devices/{{ device.id }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors" aria-label="View device">
+                            <span class="material-symbols-outlined text-sm">visibility</span>
+                        </a>
+                    </div>
+                    <div class="grid grid-cols-2 gap-3 text-sm">
+                        <div>
+                            <div class="text-[11px] uppercase tracking-wider text-on-surface-variant mb-0.5">Connection</div>
+                            <div class="font-mono text-xs text-on-surface">{{ conn }}</div>
+                        </div>
+                        <div>
+                            <div class="text-[11px] uppercase tracking-wider text-on-surface-variant mb-0.5">Satisfaction</div>
+                            <div class="font-mono text-xs {{ sat_class }}">
+                                {% if device.satisfaction is not none %}{{ device.satisfaction }}{% else %}—{% endif %}
+                            </div>
+                        </div>
+                        <div>
+                            <div class="text-[11px] uppercase tracking-wider text-on-surface-variant mb-0.5">Bandwidth</div>
+                            <div class="font-mono text-xs text-on-surface">↓{{ down }} ↑{{ up }} <span class="text-on-surface-variant">Mbps</span></div>
+                        </div>
+                        <div>
+                            <div class="text-[11px] uppercase tracking-wider text-on-surface-variant mb-0.5">Status</div>
+                            {% if device.status == 'trusted' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">Trusted</span>
+                            {% elif device.status == 'ignored' %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">Ignored</span>
+                            {% else %}
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">Unknown</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Desktop row -->
+                <div class="hidden md:grid grid-cols-[minmax(0,2fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,0.8fr)_auto] gap-4 items-center">
+                    <div class="flex items-center gap-3 min-w-0">
+                        <span class="material-symbols-outlined text-primary flex-shrink-0">{{ device_icon(device) }}</span>
+                        <div class="min-w-0">
+                            <a href="/devices/{{ device.id }}" class="text-sm font-medium text-on-surface hover:text-primary truncate block">{{ device_display_name(device) }}</a>
+                            {% if subtitle %}
+                            <div class="text-xs text-on-surface-variant truncate">{{ subtitle }}</div>
+                            {% endif %}
+                            <div class="font-mono text-[11px] text-outline truncate">{{ device.mac }}</div>
+                        </div>
+                    </div>
+                    <div class="font-mono text-xs text-on-surface-variant">{{ conn }}</div>
+                    <div class="flex items-center gap-2">
+                        {% if device.satisfaction is not none %}
+                        <span class="w-2 h-2 rounded-full {% if device.satisfaction >= 90 %}bg-secondary{% elif device.satisfaction >= 70 %}bg-warning{% else %}bg-error{% endif %}"></span>
+                        <span class="font-mono text-sm {{ sat_class }}">{{ device.satisfaction }}</span>
+                        {% else %}
+                        <span class="text-on-surface-variant text-sm">—</span>
+                        {% endif %}
+                    </div>
+                    <div class="font-mono text-xs text-on-surface">
+                        <span class="text-secondary">↓{{ down }}</span>
+                        <span class="text-primary ml-2">↑{{ up }}</span>
+                        <span class="text-on-surface-variant ml-1">Mbps</span>
+                    </div>
+                    <div>
+                        {% if device.status == 'trusted' %}
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">Trusted</span>
+                        {% elif device.status == 'ignored' %}
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">Ignored</span>
+                        {% else %}
+                        <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">Unknown</span>
+                        {% endif %}
+                    </div>
+                    <div class="text-right">
+                        <a href="/devices/{{ device.id }}" class="inline-flex items-center justify-center p-2 rounded-lg text-primary hover:bg-primary/10 transition-colors" aria-label="View device">
+                            <span class="material-symbols-outlined text-sm">visibility</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <div class="p-8 text-center text-on-surface-variant italic">No devices found.</div>
+            {% endfor %}
         </div>
     </div>
 </div>
@@ -98,38 +141,24 @@
     let currentDir = 'asc';
 
     function getSortValue(row, key) {
-        const map = {
-            mac: 'mac',
-            ip: 'ip',
-            hostname: 'hostname',
-            vendor: 'vendor',
-            status: 'status',
-            last_seen: 'lastSeen',
-        };
-        return (row.dataset[map[key]] || '').toLowerCase();
-    }
-
-    function compareValues(a, b, key) {
-        const aVal = getSortValue(a, key);
-        const bVal = getSortValue(b, key);
-        if (aVal === bVal) return 0;
-        if (!aVal) return 1;
-        if (!bVal) return -1;
-        return aVal < bVal ? -1 : 1;
+        const raw = row.dataset[key] || '';
+        if (key === 'satisfaction' || key === 'bandwidth') {
+            const n = parseFloat(raw);
+            return Number.isFinite(n) ? n : -Infinity;
+        }
+        return raw.toLowerCase();
     }
 
     function updateIndicators(activeKey, dir) {
         headers.forEach((btn) => {
-            const indicator = btn.querySelector('.sort-indicator');
-            const key = btn.dataset.sortKey;
-            if (key === activeKey) {
-                indicator.textContent = dir === 'asc' ? 'arrow_upward' : 'arrow_downward';
-                indicator.classList.remove('opacity-40');
-                indicator.classList.add('text-primary', 'opacity-100');
+            const ind = btn.querySelector('.sort-indicator');
+            if (!ind) return;
+            if (btn.dataset.sortKey === activeKey) {
+                ind.textContent = dir === 'asc' ? 'arrow_upward' : 'arrow_downward';
+                ind.classList.remove('opacity-40');
             } else {
-                indicator.textContent = 'unfold_more';
-                indicator.classList.add('opacity-40');
-                indicator.classList.remove('text-primary', 'opacity-100');
+                ind.textContent = 'unfold_more';
+                ind.classList.add('opacity-40');
             }
         });
     }
@@ -143,14 +172,17 @@
                 currentKey = key;
                 currentDir = 'asc';
             }
-
-            const rows = Array.from(tbody.querySelectorAll('tr[data-mac]'));
+            const rows = Array.from(tbody.querySelectorAll('.inventory-row'));
             rows.sort((a, b) => {
-                const result = compareValues(a, b, key);
-                return currentDir === 'asc' ? result : -result;
+                const av = getSortValue(a, key);
+                const bv = getSortValue(b, key);
+                let cmp = 0;
+                if (av < bv) cmp = -1;
+                else if (av > bv) cmp = 1;
+                return currentDir === 'asc' ? cmp : -cmp;
             });
-            rows.forEach((row) => tbody.appendChild(row));
-            updateIndicators(key, currentDir);
+            rows.forEach((r) => tbody.appendChild(r));
+            updateIndicators(currentKey, currentDir);
         });
     });
 })();

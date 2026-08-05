@@ -6,6 +6,7 @@ from app.api.routes_devices import log_action
 from app.db import get_db
 from app.models import Device, Event, NotificationChannel, Observation
 from app.web.context import template_context
+from app.web.display import build_dashboard_metrics
 from app.web.templates_env import templates
 
 router = APIRouter()
@@ -25,6 +26,16 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
         .first()
     )
 
+    recent_events = (
+        db.query(Event)
+        .options(joinedload(Event.device))
+        .order_by(Event.created_at.desc())
+        .limit(5)
+        .all()
+    )
+
+    metrics = build_dashboard_metrics(db)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
@@ -33,6 +44,8 @@ def dashboard(request: Request, db: Session = Depends(get_db)):
             request,
             stats={"total": total, "unknown": unknown, "trusted": trusted, "ignored": ignored},
             last_scan=last_scan,
+            recent_events=recent_events,
+            **metrics,
         ),
     )
 

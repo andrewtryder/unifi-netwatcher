@@ -65,17 +65,170 @@ de:ad:be:ef:00:01</pre>
         </div>
         {% endif %}
     </div>
+
+    <!-- Scan schedule -->
+    <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3 border-b border-outline pb-4">
+            <div class="w-10 h-10 rounded-lg bg-surface-variant flex items-center justify-center text-primary">
+                <span class="material-symbols-outlined">schedule</span>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-on-surface">Scan Schedule</h2>
+                <p class="text-sm text-on-surface-variant">How often NetWatcher polls the UniFi controller for clients</p>
+            </div>
+        </div>
+        <div class="pt-2 flex flex-col gap-4">
+            <p class="text-sm text-on-surface-variant">
+                Active interval:
+                <span class="font-mono text-on-surface">{{ scan_interval_seconds }}s</span>
+                <span class="text-outline">·</span>
+                <span class="text-on-surface-variant">{{ scan_interval_source }}</span>
+            </p>
+            <form id="scan-interval-form"
+                  hx-post="/tools/htmx/scan-interval"
+                  hx-target="#scan-interval-msg"
+                  hx-swap="outerHTML"
+                  class="flex flex-col gap-4">
+                <div class="flex flex-col gap-2">
+                    <label for="interval_mode" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Interval</label>
+                    <select id="interval_mode" name="interval_mode"
+                            class="w-full md:w-auto bg-background border border-outline rounded-lg px-4 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
+                        <option value="60" {% if scan_interval_seconds == 60 %}selected{% endif %}>1 minute</option>
+                        <option value="300" {% if scan_interval_seconds == 300 %}selected{% endif %}>5 minutes</option>
+                        <option value="900" {% if scan_interval_seconds == 900 %}selected{% endif %}>15 minutes</option>
+                        <option value="1800" {% if scan_interval_seconds == 1800 %}selected{% endif %}>30 minutes</option>
+                        <option value="3600" {% if scan_interval_seconds == 3600 %}selected{% endif %}>60 minutes</option>
+                        <option value="custom" {% if not scan_interval_is_preset %}selected{% endif %}>Custom (seconds)</option>
+                    </select>
+                </div>
+                <div id="custom-interval-wrap" class="{% if scan_interval_is_preset %}hidden{% endif %} flex flex-col gap-2">
+                    <label for="custom_seconds" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Custom seconds</label>
+                    <input type="number" id="custom_seconds" name="custom_seconds" min="30" step="1"
+                           value="{% if not scan_interval_is_preset %}{{ scan_interval_seconds }}{% endif %}"
+                           class="w-full md:w-48 bg-background border border-outline rounded-lg px-4 py-2.5 text-sm font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                           placeholder="e.g. 120">
+                </div>
+                <div class="flex justify-stretch md:justify-end">
+                    <button type="submit"
+                            class="w-full md:w-auto inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
+                        <span class="material-symbols-outlined text-sm">save</span> Save
+                    </button>
+                </div>
+            </form>
+            <div id="scan-interval-msg"></div>
+        </div>
+    </div>
+
+    <!-- Data retention -->
+    <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+        <div class="flex items-center gap-3 border-b border-outline pb-4">
+            <div class="w-10 h-10 rounded-lg bg-surface-variant flex items-center justify-center text-primary">
+                <span class="material-symbols-outlined">delete_sweep</span>
+            </div>
+            <div>
+                <h2 class="text-lg font-semibold text-on-surface">Data Retention</h2>
+                <p class="text-sm text-on-surface-variant">Automatically delete old observations and events to limit database growth</p>
+            </div>
+        </div>
+        <div class="pt-2 flex flex-col gap-4">
+            <p class="text-sm text-on-surface-variant">
+                Observations:
+                <span class="font-mono text-on-surface">{% if observation_retention_days == 0 %}disabled{% else %}{{ observation_retention_days }}d{% endif %}</span>
+                <span class="text-outline">·</span>
+                <span class="text-on-surface-variant">{{ observation_retention_source }}</span>
+            </p>
+            <p class="text-sm text-on-surface-variant">
+                Events:
+                <span class="font-mono text-on-surface">{% if event_retention_days == 0 %}disabled{% else %}{{ event_retention_days }}d{% endif %}</span>
+                <span class="text-outline">·</span>
+                <span class="text-on-surface-variant">{{ event_retention_source }}</span>
+            </p>
+            <form id="retention-form"
+                  hx-post="/tools/htmx/retention"
+                  hx-target="#retention-msg"
+                  hx-swap="outerHTML"
+                  class="flex flex-col gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="flex flex-col gap-2">
+                        <label for="observation_mode" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Observations</label>
+                        <select id="observation_mode" name="observation_mode"
+                                class="w-full bg-background border border-outline rounded-lg px-4 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
+                            <option value="0" {% if observation_retention_days == 0 %}selected{% endif %}>Disabled</option>
+                            <option value="7" {% if observation_retention_days == 7 %}selected{% endif %}>7 days</option>
+                            <option value="30" {% if observation_retention_days == 30 %}selected{% endif %}>30 days</option>
+                            <option value="90" {% if observation_retention_days == 90 %}selected{% endif %}>90 days</option>
+                            <option value="180" {% if observation_retention_days == 180 %}selected{% endif %}>180 days</option>
+                            <option value="365" {% if observation_retention_days == 365 %}selected{% endif %}>365 days</option>
+                            <option value="custom" {% if not observation_retention_is_preset %}selected{% endif %}>Custom (days)</option>
+                        </select>
+                        <div id="observation-custom-wrap" class="{% if observation_retention_is_preset %}hidden{% endif %} flex flex-col gap-2">
+                            <label for="observation_custom_days" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Custom days</label>
+                            <input type="number" id="observation_custom_days" name="observation_custom_days" min="0" step="1"
+                                   value="{% if not observation_retention_is_preset %}{{ observation_retention_days }}{% endif %}"
+                                   class="w-full bg-background border border-outline rounded-lg px-4 py-2.5 text-sm font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                                   placeholder="e.g. 45">
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-2">
+                        <label for="event_mode" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Events</label>
+                        <select id="event_mode" name="event_mode"
+                                class="w-full bg-background border border-outline rounded-lg px-4 py-2.5 text-sm text-on-surface focus:outline-none focus:ring-2 focus:ring-primary">
+                            <option value="0" {% if event_retention_days == 0 %}selected{% endif %}>Disabled</option>
+                            <option value="7" {% if event_retention_days == 7 %}selected{% endif %}>7 days</option>
+                            <option value="30" {% if event_retention_days == 30 %}selected{% endif %}>30 days</option>
+                            <option value="90" {% if event_retention_days == 90 %}selected{% endif %}>90 days</option>
+                            <option value="180" {% if event_retention_days == 180 %}selected{% endif %}>180 days</option>
+                            <option value="365" {% if event_retention_days == 365 %}selected{% endif %}>365 days</option>
+                            <option value="custom" {% if not event_retention_is_preset %}selected{% endif %}>Custom (days)</option>
+                        </select>
+                        <div id="event-custom-wrap" class="{% if event_retention_is_preset %}hidden{% endif %} flex flex-col gap-2">
+                            <label for="event_custom_days" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono">Custom days</label>
+                            <input type="number" id="event_custom_days" name="event_custom_days" min="0" step="1"
+                                   value="{% if not event_retention_is_preset %}{{ event_retention_days }}{% endif %}"
+                                   class="w-full bg-background border border-outline rounded-lg px-4 py-2.5 text-sm font-mono text-on-surface focus:outline-none focus:ring-2 focus:ring-primary"
+                                   placeholder="e.g. 120">
+                        </div>
+                    </div>
+                </div>
+                <p class="text-xs text-on-surface-variant">Set to <span class="font-mono">0</span> / Disabled to keep history forever. Cleanup runs daily in the web process (and once at startup).</p>
+                <div class="flex justify-stretch md:justify-end">
+                    <button type="submit"
+                            class="w-full md:w-auto inline-flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-5 py-2.5 rounded-lg transition-colors text-sm">
+                        <span class="material-symbols-outlined text-sm">save</span> Save
+                    </button>
+                </div>
+            </form>
+            <div id="retention-msg"></div>
+        </div>
+    </div>
 </div>
 
 <script>
 (function () {
     const input = document.getElementById('trusted-import-file');
     const filename = document.getElementById('trusted-import-filename');
-    if (!input || !filename) return;
-    input.addEventListener('change', () => {
-        filename.textContent = input.files?.[0]?.name || 'No file chosen';
-        filename.classList.toggle('italic', !input.files?.[0]);
-    });
+    if (input && filename) {
+        input.addEventListener('change', () => {
+            filename.textContent = input.files?.[0]?.name || 'No file chosen';
+            filename.classList.toggle('italic', !input.files?.[0]);
+        });
+    }
+
+    function bindCustomToggle(modeId, wrapId) {
+        const mode = document.getElementById(modeId);
+        const customWrap = document.getElementById(wrapId);
+        function syncCustom() {
+            if (!mode || !customWrap) return;
+            customWrap.classList.toggle('hidden', mode.value !== 'custom');
+        }
+        if (mode) {
+            mode.addEventListener('change', syncCustom);
+            syncCustom();
+        }
+    }
+    bindCustomToggle('interval_mode', 'custom-interval-wrap');
+    bindCustomToggle('observation_mode', 'observation-custom-wrap');
+    bindCustomToggle('event_mode', 'event-custom-wrap');
 })();
 </script>
 {% endblock %}

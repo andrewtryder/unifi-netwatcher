@@ -1,0 +1,19 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NetWatcher app icon: a hub connected to client devices, with one flagged as unknown, on a dark rounded square">
+  <title>NetWatcher app icon</title>
+  <rect width="512" height="512" rx="112" fill="#0f1418"/>
+
+  <line x1="256" y1="256" x2="347.9" y2="164.1" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="256" y1="256" x2="137.3" y2="172.8" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="256" y1="256" x2="140.1" y2="287.1" stroke="#38bdf8" stroke-width="10" stroke-linecap="round" opacity="0.6"/>
+  <line x1="256" y1="256" x2="370.9" y2="352.4" stroke="#f43f5e" stroke-width="10" stroke-linecap="round" opacity="0.8"/>
+
+  <circle cx="347.9" cy="164.1" r="18" fill="#38bdf8"/>
+  <circle cx="137.3" cy="172.8" r="16" fill="#38bdf8"/>
+  <circle cx="140.1" cy="287.1" r="16" fill="#38bdf8"/>
+
+  <circle cx="370.9" cy="352.4" r="36" fill="none" stroke="#f43f5e" stroke-width="6" opacity="0.5"/>
+  <circle cx="370.9" cy="352.4" r="20" fill="#f43f5e"/>
+
+  <circle cx="256" cy="256" r="30" fill="#0f1418"/>
+  <circle cx="256" cy="256" r="26" fill="#10b981"/>
+</svg>

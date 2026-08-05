@@ -10,8 +10,7 @@
     </div>
 
     <!-- Stats Grid -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- Total Devices -->
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="glass-panel p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
             <div class="flex items-center justify-between z-10">
                 <span class="text-sm font-medium text-on-surface-variant">Total Devices</span>
@@ -23,7 +22,6 @@
             </div>
         </div>
 
-        <!-- Trusted Devices -->
         <div class="glass-panel border-secondary/30 bg-secondary/5 p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
             <div class="flex items-center justify-between z-10">
                 <span class="text-sm font-medium text-secondary">Trusted Devices</span>
@@ -35,7 +33,6 @@
             </div>
         </div>
 
-        <!-- Unknown Devices -->
         <div class="glass-panel border-error/50 bg-error/5 p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
             <div class="flex items-center justify-between z-10">
                 <span class="text-sm font-medium text-error">Unknown Devices</span>
@@ -47,7 +44,6 @@
             </div>
         </div>
 
-        <!-- Ignored Devices -->
         <div class="glass-panel p-5 rounded-xl flex flex-col gap-3 relative overflow-hidden group">
             <div class="flex items-center justify-between z-10">
                 <span class="text-sm font-medium text-on-surface-variant">Ignored Devices</span>
@@ -78,6 +74,150 @@
                     <span class="scan-label">Trigger Manual Scan</span>
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Health + Throughput -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="glass-panel rounded-xl p-6 flex flex-col gap-5">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary">monitor_heart</span>
+                <h2 class="text-lg font-semibold">Network Health</h2>
+            </div>
+            {% if avg_satisfaction is not none %}
+            <div>
+                <div class="text-sm text-on-surface-variant mb-1">Average satisfaction</div>
+                <div class="text-4xl font-bold font-mono {{ avg_satisfaction_color }}">{{ avg_satisfaction }}</div>
+            </div>
+            {% set scored = satisfaction_buckets.scored_total or 1 %}
+            <div class="space-y-3">
+                <div>
+                    <div class="flex justify-between text-xs text-on-surface-variant mb-1">
+                        <span>Good (≥90)</span>
+                        <span class="font-mono text-secondary">{{ satisfaction_buckets.good }}</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-surface-variant overflow-hidden">
+                        <div class="h-full bg-secondary rounded-full" style="width: {{ (satisfaction_buckets.good / scored * 100)|round }}%"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-xs text-on-surface-variant mb-1">
+                        <span>Fair (70–89)</span>
+                        <span class="font-mono text-warning">{{ satisfaction_buckets.fair }}</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-surface-variant overflow-hidden">
+                        <div class="h-full bg-warning rounded-full" style="width: {{ (satisfaction_buckets.fair / scored * 100)|round }}%"></div>
+                    </div>
+                </div>
+                <div>
+                    <div class="flex justify-between text-xs text-on-surface-variant mb-1">
+                        <span>Poor (&lt;70)</span>
+                        <span class="font-mono text-error">{{ satisfaction_buckets.poor }}</span>
+                    </div>
+                    <div class="h-1.5 rounded-full bg-surface-variant overflow-hidden">
+                        <div class="h-full bg-error rounded-full" style="width: {{ (satisfaction_buckets.poor / scored * 100)|round }}%"></div>
+                    </div>
+                </div>
+            </div>
+            {% else %}
+            <p class="text-sm text-on-surface-variant">No satisfaction scores from online devices yet.</p>
+            {% endif %}
+        </div>
+
+        <div class="glass-panel rounded-xl p-6 flex flex-col gap-5">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary">speed</span>
+                <h2 class="text-lg font-semibold">Live Throughput</h2>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <div class="flex items-center gap-1 text-sm text-on-surface-variant mb-1">
+                        <span class="material-symbols-outlined text-secondary text-base">arrow_downward</span>
+                        Download
+                    </div>
+                    <div class="text-3xl font-bold font-mono text-on-surface">{{ total_down_mbps }}</div>
+                    <div class="text-xs text-on-surface-variant font-mono">Mbps</div>
+                </div>
+                <div>
+                    <div class="flex items-center gap-1 text-sm text-on-surface-variant mb-1">
+                        <span class="material-symbols-outlined text-primary text-base">arrow_upward</span>
+                        Upload
+                    </div>
+                    <div class="text-3xl font-bold font-mono text-on-surface">{{ total_up_mbps }}</div>
+                    <div class="text-xs text-on-surface-variant font-mono">Mbps</div>
+                </div>
+            </div>
+            {% set mix_n = online_count or 1 %}
+            <div>
+                <div class="text-xs text-on-surface-variant mb-2">Connection mix ({{ online_count }} online)</div>
+                <div class="h-2.5 rounded-full bg-surface-variant overflow-hidden flex">
+                    {% if connection_mix.wired %}<div class="h-full bg-secondary" style="width: {{ connection_mix_pct.wired }}%" title="Wired"></div>{% endif %}
+                    {% if connection_mix.band_24 %}<div class="h-full bg-primary" style="width: {{ connection_mix_pct.band_24 }}%" title="2.4 GHz"></div>{% endif %}
+                    {% if connection_mix.band_5 %}<div class="h-full bg-warning" style="width: {{ connection_mix_pct.band_5 }}%" title="5 GHz"></div>{% endif %}
+                    {% if connection_mix.band_6 %}<div class="h-full bg-error" style="width: {{ connection_mix_pct.band_6 }}%" title="6 GHz"></div>{% endif %}
+                </div>
+                <div class="flex flex-wrap gap-3 mt-3 text-xs text-on-surface-variant">
+                    <span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-secondary"></span>Wired {{ connection_mix.wired }}</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-primary"></span>2.4 GHz {{ connection_mix.band_24 }}</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-warning"></span>5 GHz {{ connection_mix.band_5 }}</span>
+                    <span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-error"></span>6 GHz {{ connection_mix.band_6 }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Needs attention + Recent activity -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-warning">priority_high</span>
+                <h2 class="text-lg font-semibold">Needs Attention</h2>
+            </div>
+            {% if attention_devices %}
+            <ul class="divide-y divide-outline">
+                {% for d in attention_devices %}
+                <li class="py-3 flex items-center gap-3">
+                    <span class="material-symbols-outlined text-on-surface-variant">{{ d.icon }}</span>
+                    <div class="min-w-0 flex-1">
+                        <a href="/devices/{{ d.id }}" class="text-sm font-medium text-on-surface hover:text-primary truncate block">{{ d.name }}</a>
+                        <div class="text-xs text-on-surface-variant font-mono truncate">{{ d.subtitle }}</div>
+                    </div>
+                    <div class="font-mono text-sm font-semibold {{ d.color }}">{{ d.satisfaction }}</div>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p class="text-sm text-on-surface-variant py-2">All devices reporting good satisfaction.</p>
+            {% endif %}
+        </div>
+
+        <div class="glass-panel rounded-xl p-6 flex flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary">history</span>
+                <h2 class="text-lg font-semibold">Recent Activity</h2>
+            </div>
+            {% if recent_events %}
+            <ul class="divide-y divide-outline">
+                {% for event in recent_events %}
+                <li class="py-3 flex items-start gap-3">
+                    {% if event.severity == 'error' %}
+                    <span class="mt-1.5 w-2 h-2 rounded-full bg-error flex-shrink-0"></span>
+                    {% elif event.severity == 'warning' %}
+                    <span class="mt-1.5 w-2 h-2 rounded-full bg-warning flex-shrink-0"></span>
+                    {% else %}
+                    <span class="mt-1.5 w-2 h-2 rounded-full bg-primary flex-shrink-0"></span>
+                    {% endif %}
+                    <div class="min-w-0 flex-1">
+                        <div class="text-sm text-on-surface truncate">{{ event.message or event.event_type }}</div>
+                        <div class="text-xs text-on-surface-variant" data-relative-time="{{ event.created_at.strftime('%Y-%m-%dT%H:%M:%SZ') }}">{{ event.created_at | relative_ago }}</div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+            <a href="/logs" class="text-sm text-primary hover:underline mt-auto pt-2">View all activity</a>
+            {% else %}
+            <p class="text-sm text-on-surface-variant py-2">No activity recorded yet.</p>
+            {% endif %}
         </div>
     </div>
 </div>

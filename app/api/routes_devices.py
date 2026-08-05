@@ -10,7 +10,7 @@ from app.config import settings
 from app.db import get_db
 from app.models import AuditLog, Device, Event, NotificationDelivery, Observation
 from app.schemas import BulkDeviceIdsRequest, NotesRequest, RenameRequest
-from app.unifi.client import UnifiClient
+from app.unifi.client import get_unifi_client
 from app.web.context import template_context
 from app.web.templates_env import templates
 
@@ -195,7 +195,7 @@ def block_modal(request: Request, device_id: int, db: Session = Depends(get_db))
 def block_device_action(request: Request, device_id: int, db: Session = Depends(get_db)):
     device = get_device_or_404(db, device_id)
 
-    client = UnifiClient()
+    client = get_unifi_client()
     success = client.block_client(device.mac)
 
     if success:
@@ -218,7 +218,7 @@ def block_device_action(request: Request, device_id: int, db: Session = Depends(
 def unblock_device_action(request: Request, device_id: int, db: Session = Depends(get_db)):
     device = get_device_or_404(db, device_id)
 
-    client = UnifiClient()
+    client = get_unifi_client()
     success = client.unblock_client(device.mac)
 
     if success:

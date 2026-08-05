@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class UnifiClient:
-    def __init__(self):
+    def __init__(self, *, shared_http: httpx.Client | None = None):
         self.base_url = settings.UNIFI_URL.rstrip("/")
         self.site = settings.UNIFI_SITE
         self.username = settings.UNIFI_USERNAME
@@ -20,8 +20,13 @@ class UnifiClient:
         self.timeout = settings.UNIFI_TIMEOUT_SECONDS
         self.mock_mode = settings.UNIFI_MOCK_MODE
         self.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
-        self.client = httpx.Client(verify=self.verify_ssl, timeout=self.timeout)
+        self._owns_client = shared_http is None
+        self.client = shared_http or httpx.Client(verify=self.verify_ssl, timeout=self.timeout)
         self._logged_in = False
+
+    def close(self) -> None:
+        if self._owns_client and self.client is not None and not self.client.is_closed:
+            self.client.close()
 
     def _get_mock_data(self) -> list[dict[str, Any]]:
         mock_file = Path(__file__).parent / "mock_unifi_data.json"
@@ -96,3 +101,30 @@ class UnifiClient:
 
     def unblock_client(self, mac: str) -> bool:
         return self._stamgr_cmd("unblock-sta", mac)
+
+
+_shared_client: UnifiClient | None = None
+
+
+def get_unifi_client() -> UnifiClient:
+    """Process-scoped UniFi client with a reused httpx connection pool."""
+    global _shared_client
+    if _shared_client is None:
+        _shared_client = UnifiClient()
+    else:
+        # Refresh settings that may change via env in tests
+        _shared_client.mock_mode = settings.UNIFI_MOCK_MODE
+        _shared_client.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
+        _shared_client.base_url = settings.UNIFI_URL.rstrip("/")
+        _shared_client.site = settings.UNIFI_SITE
+        _shared_client.username = settings.UNIFI_USERNAME
+        _shared_client.password = settings.UNIFI_PASSWORD
+        _shared_client.verify_ssl = settings.UNIFI_VERIFY_SSL
+    return _shared_client
+
+
+def close_unifi_client() -> None:
+    global _shared_client
+    if _shared_client is not None:
+        _shared_client.close()
+        _shared_client = None

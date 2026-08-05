@@ -1,0 +1,11 @@
+<div id="{{ target_id|default('security-msg') }}"
+     class="mt-4 p-4 rounded-lg text-sm {% if ok %}bg-secondary/10 border border-secondary/20 text-secondary{% else %}bg-error/10 border border-error/20 text-error{% endif %}">
+    <p class="font-medium">{{ message }}</p>
+    {% if errors %}
+    <ul class="mt-2 list-disc list-inside space-y-1">
+        {% for err in errors %}
+        <li>{{ err }}</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
