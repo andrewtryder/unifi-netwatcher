@@ -474,6 +474,43 @@ def test_same_origin_mismatch(sec_client):
     assert r.status_code == 403
 
 
+def test_public_origin_allows_https_proxy_scheme(sec_client, monkeypatch):
+    monkeypatch.setattr(
+        "app.security.middleware.app_settings.PUBLIC_ORIGIN",
+        "https://netwatcher.home.arpa",
+    )
+    r = sec_client.post(
+        "/security/htmx/authentication",
+        data={
+            "authentication_enabled": "on",
+            "username": "admin",
+            "current_password": "admin",
+            "new_password": "",
+            "confirm_password": "",
+        },
+        headers={**AUTH, "Origin": "https://netwatcher.home.arpa"},
+    )
+    assert r.status_code != 403
+
+
+def test_recovery_bypass_skips_trusted_host(sec_client, monkeypatch):
+    db = TestingSessionLocal()
+    row = ensure_security_settings(db)
+    row.host_restriction_enabled = True
+    row.allowed_hosts_json = []
+    db.add(row)
+    db.commit()
+    db.close()
+    invalidate_security_cache()
+
+    blocked = sec_client.get("/", headers={**AUTH, "Host": "evil.example"})
+    assert blocked.status_code == 403
+
+    monkeypatch.setattr("app.security.middleware.app_settings.SECURITY_RECOVERY_BYPASS", True)
+    allowed = sec_client.get("/", headers={**AUTH, "Host": "evil.example"})
+    assert allowed.status_code == 200
+
+
 def test_security_page_escapes_username_in_form(sec_client):
     db = TestingSessionLocal()
     update_authentication(

@@ -107,6 +107,9 @@ async def lifespan(app: FastAPI):
         ensure_security_settings(db)
         try:
             migrate_notification_secrets(db)
+            from app.security.secrets import cleanup_key_rotation_backup
+
+            cleanup_key_rotation_backup(Path(settings.APP_SECRET_KEY_PATH))
         except SecretKeyError:
             logger.exception("Notification secret migration failed")
             raise
@@ -123,8 +126,8 @@ async def lifespan(app: FastAPI):
         )
         if settings.SECURITY_RECOVERY_BYPASS:
             logger.warning(
-                "SECURITY_RECOVERY_BYPASS is enabled — CIDR filtering is bypassed. "
-                "Disable this flag after recovering access."
+                "SECURITY_RECOVERY_BYPASS is enabled — CIDR and trusted-host "
+                "filtering are bypassed. Disable this flag after recovering access."
             )
     finally:
         db.close()

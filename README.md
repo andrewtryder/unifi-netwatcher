@@ -38,10 +38,12 @@ Edit `.env` before starting the container. At minimum, set:
 
 - `UNIFI_URL`
 - `UNIFI_USERNAME`
-- `UNIFI_PASSWORD`
+- `UNIFI_PASSWORD` (must not be a placeholder when talking to a real controller)
 - `UNIFI_SITE`
 - `UNIFI_VERIFY_SSL`
 - `UNIFI_MOCK_MODE=false`
+
+Leave `APP_SECRET_KEY` empty so the container generates `data/app-secret.key` on first start (persisted in the Compose data volume).
 
 Then start NetWatcher:
 
@@ -53,7 +55,7 @@ Open **http://localhost:8080** (or your host's IP on port 8080). Sign in with th
 
 Images are published to [GHCR](https://github.com/andrewtryder/unifi-netwatcher/pkgs/container/unifi-netwatcher) and [Docker Hub](https://hub.docker.com/r/andrewtryder/unifi-netwatcher) on each release. `compose.yml` pulls from GHCR by default; pin a version by changing the image tag (e.g. `ghcr.io/andrewtryder/unifi-netwatcher:0.1.0`).
 
-The published image runs as a non-root user (`uid`/`gid` `10001`) with a read-only root filesystem, dropped capabilities, and `no-new-privileges`. Ensure `./data` and `./logs` are writable by that user (for example `mkdir -p data logs && sudo chown -R 10001:10001 data logs`). Optional reverse-proxy bind to `127.0.0.1` is fine; the default `8080:8080` publish remains for typical LAN Docker deploys.
+The published image runs as a non-root user (`uid`/`gid` `10001`) with a read-only root filesystem, dropped capabilities, and `no-new-privileges`. Production Compose uses a **named volume** (`netwatcher-data`) for `/app/data`, so ownership is handled inside the container—no host `chown` is required for a fresh install. Optional reverse-proxy bind to `127.0.0.1` is fine; the default `8080:8080` publish remains for typical LAN Docker deploys.
 
 ### Updates
 
@@ -72,35 +74,37 @@ Requires [uv](https://docs.astral.sh/uv/), **Python 3.14+**, and Node 20+.
 uv sync
 npm ci && npm run build:css
 
-cp .env.example .env
+cp .env.development.example .env
 uv run alembic upgrade head
 uv run uvicorn app.main:app --reload --port 8080
 ```
 
-For local development without a UniFi controller, set `UNIFI_MOCK_MODE=true` in `.env`.
+`.env.development.example` enables mock mode and a local-only secret. For production Docker installs, copy `.env.example` instead (empty `APP_SECRET_KEY`, `APP_ENV=production`).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for PR title conventions, hooks, and release flow.
 ### Docker-based development
 
-Builds from source and enables mock mode via `compose.dev.yml`:
+Builds from source and enables mock mode via `compose.dev.yml` (bind-mounts `./data` for local inspection):
 
 ```bash
 cp .env.example .env
+mkdir -p data && sudo chown -R 10001:10001 data
 docker compose -f compose.yml -f compose.dev.yml up --build
 ```
 
 ## Configuration
 
-Copy `.env.example` to `.env` and adjust as needed. Notification channels (Pushover, webhooks, etc.) are configured in the Web UI, not via environment variables. Background jobs (scans, OUI updates, retention) share a single APScheduler inside the web process — keep one uvicorn worker and one replica.
+Copy `.env.example` (production / Docker) or `.env.development.example` (native local) to `.env` and adjust as needed. Notification channels (Pushover, webhooks, etc.) are configured in the Web UI, not via environment variables. Background jobs (scans, OUI updates, retention) share a single APScheduler inside the web process — keep one uvicorn worker and one replica.
 
 | Variable | Description |
 |---|---|
-| `APP_ENV` | `production` or `development` (`.env.example` defaults to development). Development disables Jinja template bytecode caching. Invalid config aborts startup. |
-| `APP_SECRET_KEY` | Optional when a persisted key file is used. If set in production, must be a non-placeholder secret of at least 16 characters. Used to derive Fernet encryption for notification channel configs. |
+| `APP_ENV` | One of `production`, `development`, or `test`. Typos are rejected at startup. Development disables Jinja template bytecode caching. |
+| `APP_SECRET_KEY` | Optional when a persisted key file is used. If set in production, must be a non-placeholder secret of at least 16 characters. Leave empty to generate `data/app-secret.key` on first start. |
 | `APP_SECRET_KEY_PATH` | Path for the generated/persisted key file when `APP_SECRET_KEY` is empty. Default `data/app-secret.key` (mode `0600`). |
+| `PUBLIC_ORIGIN` | Optional absolute browser origin (e.g. `https://netwatcher.home.arpa`) for same-origin checks behind an HTTPS reverse proxy. Leave empty for direct LAN access. |
 | `IMPORT_MAX_BYTES` | Max trusted-import upload size (bytes). Default `1000000`. |
 | `IMPORT_MAX_ROWS` | Max trusted-import data rows. Default `5000`. |
-| `DATABASE_URL` | SQLite database path. Default `sqlite:///./data/netwatcher.db` works for both local dev and Docker (data is mounted at `./data`). |
+| `DATABASE_URL` | SQLite database path. Default `sqlite:///./data/netwatcher.db` (Compose mounts data at `/app/data` via the `netwatcher-data` volume). |
 | `UNIFI_URL` | Base URL of your UniFi Network application (no trailing slash). |
 | `UNIFI_USERNAME` | UniFi account username. A dedicated account with only the permissions needed is recommended. |
 | `UNIFI_PASSWORD` | UniFi account password. |
@@ -115,7 +119,7 @@ Copy `.env.example` to `.env` and adjust as needed. Notification channels (Pusho
 | `UNIFI_DRY_RUN_BLOCKS` | When `true`, log block actions without sending them to the controller. |
 | `UNIFI_MOCK_MODE` | When `true`, use fixture data instead of a real controller. For demo/development only. |
 | `WEBHOOK_ALLOWED_HOSTS` | Optional comma-separated hostnames allowed for outbound webhooks (SSRF allowlist bypass). |
-| `SECURITY_RECOVERY_BYPASS` | Emergency only: when `true`, bypass CIDR filtering (does not disable auth or reset passwords). Default `false`. |
+| `SECURITY_RECOVERY_BYPASS` | Emergency only: when `true`, bypass CIDR **and** trusted-host filtering (does not disable auth or reset passwords). Default `false`. |
 
 ## Releases
 
@@ -152,14 +156,15 @@ Notification channel configs (Pushover tokens, webhook URLs/headers) are stored 
 
 - **Back up the database and key file** before upgrades or key changes.
 - Changing the secret without rekeying makes existing encrypted channels unreadable; the app refuses to start if encrypted rows cannot be decrypted.
-- Rekey after rotating secrets:
+- Rekey after rotating secrets (staged: verify → DB transaction → backup → atomic key replace):
 
 ```bash
 OLD_APP_SECRET_KEY='previous-secret' uv run python -m app.cli rekey
-# or generate a new key file:
+# or generate a new key file safely:
 uv run python -m app.cli rekey --old-key 'previous-secret' --generate-file
 ```
 
+A failed rekey leaves the active key file and database unchanged. If activation fails after the DB commit, the new key remains at `app-secret.key.new` for manual recovery.
 ### Trusted hosts
 
 Connect first via `http://<lan-ip>:8080` (private/loopback IP literals and `localhost` are allowed by default). Then add DNS names such as `netwatcher.home.arpa` under **Security → Trusted Hosts**.
@@ -189,7 +194,7 @@ fd00:1234::/64
 SECURITY_RECOVERY_BYPASS=true
 ```
 
-When set, CIDR filtering is bypassed only (authentication and trusted hosts are unchanged; passwords are not reset). The app logs a prominent startup warning. Disable the flag after you regain access and fix the allowlist.
+When set, CIDR **and** trusted-host filtering are bypassed (authentication is unchanged; passwords are not reset). The app logs a prominent startup warning. Disable the flag after you regain access and fix the allowlist / trusted hosts.
 
 ### Other guidance
 
@@ -198,4 +203,5 @@ When set, CIDR filtering is bypassed only (authentication and trusted hosts are 
 - **`UNIFI_VERIFY_SSL=true`** by default. For self-signed controllers, mount a CA and set `UNIFI_CA_BUNDLE`, or set `UNIFI_VERIFY_SSL=false` only on trusted LANs.
 - Prefer **versioned image tags or digests** for production (`latest` is convenient, not a pin).
 - Outbound webhook delivery pins DNS-resolved IPs at connect time; still consider an outbound firewall blocking loopback/RFC1918/link-local/metadata from the container as defense-in-depth.
-- **Protect the data directory.** Notification secrets, UniFi configuration, password hashes, and `app-secret.key` live under `./data`.
+- **Protect the data volume.** Notification secrets, UniFi configuration, password hashes, and `app-secret.key` live under `/app/data` (Compose volume `netwatcher-data`).
+- Behind HTTPS, set **`PUBLIC_ORIGIN`** to the browser-facing origin so same-origin checks match the proxy scheme.

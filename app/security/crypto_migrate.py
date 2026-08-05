@@ -75,6 +75,24 @@ def migrate_notification_secrets(db: Session) -> dict[str, int]:
     }
 
 
+def verify_channels_with_fernet(db: Session, fernet) -> int:
+    """Ensure every channel config decrypts/parses with the given Fernet. No writes."""
+    channels = db.query(NotificationChannel).all()
+    for channel in channels:
+        try:
+            decrypt_config(channel.config_json, fernet=fernet)
+        except SecretKeyError as exc:
+            raise SecretKeyError(
+                f"Notification channel id={channel.id} name={channel.name!r} cannot "
+                "be decrypted with the provided key."
+            ) from exc
+        except (ValueError, TypeError) as exc:
+            raise SecretKeyError(
+                f"Notification channel id={channel.id} has unparseable config: {exc}"
+            ) from exc
+    return len(channels)
+
+
 def rekey_notification_secrets(
     db: Session,
     *,

@@ -7,8 +7,7 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data
-      - ./logs:/app/logs
+      - netwatcher-data:/app/data
     tmpfs:
       - /tmp
     read_only: true
@@ -17,3 +16,6 @@ services:
     cap_drop:
       - ALL
     restart: unless-stopped
+
+volumes:
+  netwatcher-data:

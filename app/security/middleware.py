@@ -62,6 +62,12 @@ def origin_matches_request(request: Request) -> bool:
     parsed = urlparse(origin)
     if not parsed.scheme or not parsed.netloc:
         return False
+    public = (app_settings.PUBLIC_ORIGIN or "").strip()
+    if public:
+        expected = urlparse(public)
+        return secrets.compare_digest(
+            parsed.scheme.lower(), expected.scheme.lower()
+        ) and secrets.compare_digest(parsed.netloc.lower(), expected.netloc.lower())
     expected_host = request.headers.get("host") or request.url.netloc
     expected_scheme = request.url.scheme
     return secrets.compare_digest(
@@ -165,7 +171,7 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         try:
             sec, db = _load_policy()
 
-            if sec.host_restriction_enabled:
+            if sec.host_restriction_enabled and not app_settings.SECURITY_RECOVERY_BYPASS:
                 raw_host = request.headers.get("host") or request.url.hostname or ""
                 if not host_allowed(
                     normalize_request_host(raw_host),
