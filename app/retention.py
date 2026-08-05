@@ -39,8 +39,7 @@ def run_retention(db: Session, *, now: datetime | None = None) -> dict:
     if event_days > 0:
         cutoff = now - timedelta(days=event_days)
         old_event_ids = [
-            row[0]
-            for row in db.query(Event.id).filter(Event.created_at < cutoff).all()
+            row[0] for row in db.query(Event.id).filter(Event.created_at < cutoff).all()
         ]
         if old_event_ids:
             deliveries_deleted = (

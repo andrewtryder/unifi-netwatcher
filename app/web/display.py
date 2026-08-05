@@ -44,9 +44,7 @@ _DEV_CAT_ICONS: dict[str, str] = {
 }
 
 
-def _resolve_non_negative_int_setting(
-    db: Session, key: str, env_default: int
-) -> tuple[int, str]:
+def _resolve_non_negative_int_setting(db: Session, key: str, env_default: int) -> tuple[int, str]:
     """Return (value, source). Stored ``0`` is a valid override (disabled)."""
     row = db.query(Setting).filter(Setting.key == key).first()
     if row and row.value is not None and str(row.value).strip():
@@ -54,7 +52,7 @@ def _resolve_non_negative_int_setting(
             value = int(row.value)
             if value >= 0:
                 return value, "stored override"
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     return env_default, "environment default"
 
@@ -67,7 +65,7 @@ def resolve_scan_interval(db: Session) -> tuple[int, str]:
             seconds = int(row.value)
             if seconds > 0:
                 return seconds, "stored override"
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             pass
     return settings.SCAN_INTERVAL_SECONDS, "environment default"
 

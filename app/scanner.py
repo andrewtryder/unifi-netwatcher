@@ -38,7 +38,7 @@ def _as_int(value) -> int | None:
         return None
     try:
         return int(value)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return None
 
 
@@ -336,9 +336,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         if device.status == "unknown":
             unknown_candidates.append(device)
 
-    cooldown_ids = _devices_in_alert_cooldown(
-        db, [d.id for d in unknown_candidates], now
-    )
+    cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
     alert_intents: list[AlertIntent] = []
     for device in unknown_candidates:
         if device.id in cooldown_ids:

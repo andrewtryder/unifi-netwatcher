@@ -47,7 +47,7 @@ def _parse_retention_days(mode: str, custom_days: int | None) -> int | HTMLRespo
         return int(custom_days)
     try:
         days = int(mode)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return HTMLResponse(
             "<div id='retention-msg' class='mt-4 p-4 rounded-lg bg-error/10 border border-error/20 "
             "text-error text-sm'>Invalid retention selection.</div>",
@@ -104,7 +104,7 @@ def save_scan_interval(
     else:
         try:
             seconds = int(interval_mode)
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             return HTMLResponse(
                 "<div id='scan-interval-msg' class='mt-4 p-4 rounded-lg bg-error/10 border border-error/20 "
                 "text-error text-sm'>Invalid interval selection.</div>",
