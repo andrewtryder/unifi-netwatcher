@@ -15,6 +15,7 @@ dependencies = [
     "apscheduler",
     "python-multipart",
     "pwdlib[argon2]==0.2.1",
+    "cryptography>=50.0.0",
 ]
 
 [dependency-groups]
@@ -22,7 +23,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pytest-cov",
-    "ruff",
+    "ruff==0.16.1",
     "pre-commit",
 ]
 

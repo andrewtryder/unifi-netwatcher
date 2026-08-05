@@ -29,7 +29,8 @@ cp .env.example .env
 uv sync
 npm ci && npm run build:css
 
-# optional: install git hooks
+# Required: install git hooks so commits run the same ruff/pytest/frontend/workflow
+# checks as CI (docker image build stays CI-only — too slow for every commit).
 uv run pre-commit install
 
 uv run uvicorn app.main:app --reload --port 8080
@@ -45,6 +46,14 @@ docker compose -f compose.yml -f compose.dev.yml up --build
 
 ## Checks before opening a PR
 
+Pre-commit runs these automatically on relevant file changes. To run everything manually (same as CI python / frontend / actions-lint jobs):
+
+```bash
+uv run pre-commit run --all-files
+```
+
+Or individually:
+
 ```bash
 uv run ruff check app tests
 uv run ruff format --check app tests
@@ -52,7 +61,7 @@ uv run pytest
 npm ci && npm run build:css
 ```
 
-CI also builds the Docker image and runs `actionlint` / `zizmor` on workflows.
+CI also builds the multi-arch Docker image (`docker` job) and runs `actionlint` / `zizmor` on workflows.
 
 ## Releases
 

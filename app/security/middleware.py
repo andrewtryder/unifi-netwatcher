@@ -1,4 +1,4 @@
-"""Centralized HTTP Basic auth, CIDR filtering, and same-origin checks."""
+"""Centralized HTTP Basic auth, CIDR filtering, same-origin checks, and CSP."""
 
 from __future__ import annotations
 
@@ -40,9 +40,10 @@ def effective_client_ip(request: Request) -> str:
 
 
 def origin_matches_request(request: Request) -> bool:
+    """Require an Origin header that exactly matches this request's host/scheme."""
     origin = request.headers.get("origin")
     if not origin:
-        return True
+        return False
     parsed = urlparse(origin)
     if not parsed.scheme or not parsed.netloc:
         return False
@@ -79,12 +80,31 @@ def _parse_basic_auth(header: str | None) -> tuple[str, str] | None:
     return username, password
 
 
+def _csp_header(nonce: str) -> str:
+    return (
+        "default-src 'self'; "
+        f"script-src 'self' 'nonce-{nonce}'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "connect-src 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'; "
+        "object-src 'none'"
+    )
+
+
 class AccessControlMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
 
         if is_public_path(path):
-            return await call_next(request)
+            response = await call_next(request)
+            response.headers.setdefault("Content-Security-Policy", _csp_header(nonce))
+            return response
 
         if request.method in MUTATING_METHODS and not origin_matches_request(request):
             return _forbidden("Origin mismatch")
@@ -93,7 +113,6 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         try:
             sec = get_security_policy(db)
 
-            # CIDR enforcement (optional recovery bypass)
             if sec.cidr_restriction_enabled and not app_settings.SECURITY_RECOVERY_BYPASS:
                 client_ip = effective_client_ip(request)
                 if not client_ip_allowed(client_ip, list(sec.allowed_cidrs)):
@@ -107,4 +126,6 @@ class AccessControlMiddleware(BaseHTTPMiddleware):
         finally:
             db.close()
 
-        return await call_next(request)
+        response = await call_next(request)
+        response.headers.setdefault("Content-Security-Policy", _csp_header(nonce))
+        return response

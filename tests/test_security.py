@@ -21,7 +21,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from tests.conftest import basic_auth_header
+from tests.conftest import auth_headers, basic_auth_header
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 engine = create_engine(
@@ -56,7 +56,7 @@ def sec_client(monkeypatch):
     app.dependency_overrides.pop(get_db, None)
 
 
-AUTH = basic_auth_header()
+AUTH = auth_headers()
 
 
 def test_init_defaults(sec_client):
@@ -92,7 +92,10 @@ def test_wrong_password_fails(sec_client):
 
 def test_protected_without_credentials(sec_client):
     assert sec_client.get("/").status_code == 401
-    assert sec_client.post("/api/scan/run").status_code == 401
+    assert sec_client.post("/api/scan/run").status_code in (401, 403)
+    assert (
+        sec_client.post("/api/scan/run", headers={"Origin": "http://testserver"}).status_code == 401
+    )
 
 
 def test_health_endpoints_public(sec_client):
@@ -343,6 +346,21 @@ def test_same_origin_mismatch(sec_client):
     assert r.status_code == 403
 
 
+def test_missing_origin_rejected(sec_client):
+    r = sec_client.post(
+        "/security/htmx/authentication",
+        data={
+            "authentication_enabled": "on",
+            "username": "admin",
+            "current_password": "admin",
+            "new_password": "",
+            "confirm_password": "",
+        },
+        headers=basic_auth_header(),  # no Origin
+    )
+    assert r.status_code == 403
+
+
 def test_security_page_escapes_username_in_form(sec_client):
     db = TestingSessionLocal()
     update_authentication(
@@ -357,7 +375,7 @@ def test_security_page_escapes_username_in_form(sec_client):
     db.close()
     invalidate_security_cache()
 
-    evil_auth = basic_auth_header('"><img src=x onerror=alert(1)>', "admin")
+    evil_auth = auth_headers('"><img src=x onerror=alert(1)>', "admin")
     r = sec_client.get("/security", headers=evil_auth)
     assert r.status_code == 200
     assert "onerror=alert(1)" not in r.text or "&gt;" in r.text

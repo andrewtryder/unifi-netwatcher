@@ -1,16 +1,62 @@
+# Keep hook revs / commands aligned with .github/workflows/ci.yml
+# (ruff 0.16.1 matches [dependency-groups] ruff in uv.lock).
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.16.1
     hooks:
-      - id: ruff
+      # Auto-fix staged Python (lint then format — same order as Astral docs).
+      - id: ruff-check
+        types_or: [python, pyi]
+        files: ^(app|tests)/
         args: [--fix]
       - id: ruff-format
+        types_or: [python, pyi]
+        files: ^(app|tests)/
 
   - repo: local
     hooks:
+      # Exact CI python job commands (full tree, not only staged files).
+      - id: ruff-check-ci
+        name: ruff check app tests (CI)
+        entry: uv run ruff check app tests
+        language: system
+        pass_filenames: false
+        files: ^(app|tests)/
+        types: [python]
+
+      - id: ruff-format-ci
+        name: ruff format --check app tests (CI)
+        entry: uv run ruff format --check app tests
+        language: system
+        pass_filenames: false
+        files: ^(app|tests)/
+        types: [python]
+
+      - id: pytest
+        name: pytest (CI)
+        entry: uv run pytest
+        language: system
+        pass_filenames: false
+        files: ^(app|tests)/
+        types: [python]
+
+      - id: frontend-css
+        name: npm ci && npm run build:css (CI)
+        entry: bash -c 'npm ci && npm run build:css'
+        language: system
+        pass_filenames: false
+        files: ^(package(-lock)?\.json|tailwind\.config\.js|postcss\.config\.js|scripts/|app/web/(static/tailwind\.input\.css|templates/.*\.html))$
+
       - id: actionlint
-        name: actionlint
+        name: actionlint (CI)
         entry: actionlint
+        language: system
+        files: ^\.github/workflows/.*\.ya?ml$
+        pass_filenames: false
+
+      - id: zizmor
+        name: zizmor (CI)
+        entry: uvx zizmor --persona pedantic .github/workflows
         language: system
         files: ^\.github/workflows/.*\.ya?ml$
         pass_filenames: false

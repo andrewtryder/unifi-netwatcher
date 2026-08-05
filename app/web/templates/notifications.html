@@ -3,7 +3,7 @@
 <div class="flex flex-col gap-6 max-w-4xl mx-auto pb-16 md:pb-0">
     <div class="flex items-center justify-between">
         <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface">Alert Channels</h1>
-        <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+        <button type="button" data-modal-open="create-modal"
                 class="flex items-center gap-2 bg-primary hover:bg-primary/90 text-background font-medium px-4 py-2 rounded-lg transition-colors text-sm">
             <span class="material-symbols-outlined text-sm">add</span> New Channel
         </button>
@@ -18,7 +18,7 @@
             <span class="material-symbols-outlined text-4xl text-outline mb-3">notifications_off</span>
             <h3 class="text-lg font-medium text-on-surface mb-1">No alert channels configured</h3>
             <p class="text-sm text-on-surface-variant mb-4">You won't receive notifications for unknown devices.</p>
-            <button onclick="document.getElementById('create-modal').classList.remove('hidden')"
+            <button type="button" data-modal-open="create-modal"
                     class="inline-flex items-center gap-2 text-primary hover:text-primary/80 font-medium text-sm">
                 <span class="material-symbols-outlined text-sm">add</span> Add your first channel
             </button>
@@ -31,12 +31,12 @@
         <div class="glass-panel w-full max-w-md rounded-xl shadow-2xl overflow-hidden border border-outline">
             <div class="flex items-center justify-between p-4 border-b border-outline bg-surface-variant/30">
                 <h3 class="font-semibold text-lg text-on-surface">Create Notification Channel</h3>
-                <button onclick="document.getElementById('create-modal').classList.add('hidden')" class="text-outline hover:text-on-surface transition-colors">
+                <button type="button" data-modal-close="create-modal" class="text-outline hover:text-on-surface transition-colors">
                     <span class="material-symbols-outlined">close</span>
                 </button>
             </div>
             <form id="create-channel-form" hx-post="/api/notifications/htmx/create" hx-target="#channels-list" hx-swap="beforeend"
-                  onsubmit="document.getElementById('create-modal').classList.add('hidden')" class="p-6 flex flex-col gap-4">
+                  data-close-modal-on-submit="create-modal" class="p-6 flex flex-col gap-4">
                 <input type="hidden" name="config_json" id="config_json">
 
                 <div class="flex flex-col gap-1.5">
@@ -93,43 +93,26 @@
                             Webhook URL
                             <span class="field-help" tabindex="0">
                                 <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
-                                <span class="field-help-tip">The full HTTPS endpoint NetWatcher calls when an alert fires, e.g. a Slack/Discord incoming webhook or your own automation URL.</span>
+                                <span class="field-help-tip">HTTPS endpoint on an allowlisted host (WEBHOOK_ALLOWED_HOSTS). HTTP, private IPs, and non-POST methods are rejected.</span>
                             </span>
                         </label>
-                        <input type="url" id="webhook-url" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 font-mono" placeholder="https://example.com/hooks/alert">
+                        <input type="url" id="webhook-url" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 font-mono" placeholder="https://hooks.example.com/alert" pattern="https://.*">
                     </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label for="webhook-method" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono flex items-center gap-1.5">
-                            HTTP Method
-                            <span class="field-help" tabindex="0">
-                                <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
-                                <span class="field-help-tip">POST and PUT send a JSON body (most common). GET appends the alert text as a URL query parameter instead — use only if your endpoint expects that.</span>
-                            </span>
-                        </label>
-                        <select id="webhook-method" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5">
-                            <option value="POST" selected>POST</option>
-                            <option value="PUT">PUT</option>
-                            <option value="GET">GET</option>
-                        </select>
-                    </div>
+                    <input type="hidden" id="webhook-method" value="POST">
                     <div id="webhook-body-section" class="flex flex-col gap-1.5">
                         <label for="webhook-body" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono flex items-center gap-1.5">
                             JSON Request Body
                             <span class="field-help" tabindex="0">
                                 <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
-                                <span class="field-help-tip">JSON sent in the request body for POST/PUT. Use {{message}} as a placeholder — it is replaced with the alert text. Default matches most chat webhooks: {&quot;text&quot;: &quot;...&quot;}.</span>
+                                <span class="field-help-tip">JSON sent in the POST body. Use {{message}} as a placeholder — it is replaced with the alert text. Default: {&quot;text&quot;: &quot;...&quot;}.</span>
                             </span>
                         </label>
                         <textarea id="webhook-body" rows="4" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 font-mono">{"text": "{{message}}"}</textarea>
                     </div>
-                    <div id="webhook-get-section" class="hidden rounded-lg border border-outline bg-surface-variant/20 p-3 text-xs text-on-surface-variant">
-                        <span class="font-medium text-on-surface">GET requests</span> send the alert as a query parameter:
-                        <code class="font-mono text-primary">?text=&lt;alert message&gt;</code>
-                    </div>
                 </div>
 
                 <div class="flex justify-end gap-3 mt-4">
-                    <button type="button" onclick="document.getElementById('create-modal').classList.add('hidden')" class="px-4 py-2 rounded-lg text-sm font-medium text-on-surface hover:bg-surface-variant transition-colors">Cancel</button>
+                    <button type="button" data-modal-close="create-modal" class="px-4 py-2 rounded-lg text-sm font-medium text-on-surface hover:bg-surface-variant transition-colors">Cancel</button>
                     <button type="submit" class="bg-primary hover:bg-primary/90 text-background font-medium px-4 py-2 rounded-lg transition-colors text-sm">Create Channel</button>
                 </div>
             </form>
@@ -137,7 +120,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
     const typeSelect = document.getElementById('channel-type');
     const pushoverConfig = document.getElementById('pushover-config');
@@ -147,69 +130,35 @@
     const pushoverUser = document.getElementById('pushover-user');
     const pushoverToken = document.getElementById('pushover-token');
     const webhookUrl = document.getElementById('webhook-url');
-    const webhookMethod = document.getElementById('webhook-method');
     const webhookBody = document.getElementById('webhook-body');
-    const webhookBodySection = document.getElementById('webhook-body-section');
-    const webhookGetSection = document.getElementById('webhook-get-section');
 
-    function updateWebhookMethodFields() {
-        const isGet = webhookMethod.value === 'GET';
-        webhookBodySection.classList.toggle('hidden', isGet);
-        webhookGetSection.classList.toggle('hidden', !isGet);
-        webhookBody.required = !isGet && typeSelect.value === 'webhook';
+    function syncType() {
+        const isWebhook = typeSelect.value === 'webhook';
+        pushoverConfig.classList.toggle('hidden', isWebhook);
+        webhookConfig.classList.toggle('hidden', !isWebhook);
+        pushoverUser.required = !isWebhook;
+        pushoverToken.required = !isWebhook;
+        webhookUrl.required = isWebhook;
+        webhookBody.required = isWebhook;
     }
 
-    function updateConfigVisibility() {
-        const isPushover = typeSelect.value === 'pushover';
-        pushoverConfig.classList.toggle('hidden', !isPushover);
-        webhookConfig.classList.toggle('hidden', isPushover);
-        pushoverUser.required = isPushover;
-        pushoverToken.required = isPushover;
-        webhookUrl.required = !isPushover;
-        updateWebhookMethodFields();
-    }
+    typeSelect.addEventListener('change', syncType);
+    syncType();
 
-    typeSelect.addEventListener('change', updateConfigVisibility);
-    webhookMethod.addEventListener('change', updateWebhookMethodFields);
-
-    form.addEventListener('submit', (event) => {
+    form.addEventListener('submit', () => {
         if (typeSelect.value === 'pushover') {
-            if (!pushoverUser.value.trim() || !pushoverToken.value.trim()) {
-                event.preventDefault();
-                alert('Please enter both your Pushover User Key and API Token.');
-                return;
-            }
             configInput.value = JSON.stringify({
-                user: pushoverUser.value.trim(),
-                token: pushoverToken.value.trim(),
+                user: pushoverUser.value,
+                token: pushoverToken.value,
             });
         } else {
-            if (!webhookUrl.value.trim()) {
-                event.preventDefault();
-                alert('Please enter a webhook URL.');
-                return;
-            }
-            const method = webhookMethod.value;
-            const config = {
-                url: webhookUrl.value.trim(),
-                method: method,
-            };
-            if (method !== 'GET') {
-                const bodyText = webhookBody.value.trim();
-                try {
-                    JSON.parse(bodyText.replace(/\{\{message\}\}/g, 'test'));
-                } catch (e) {
-                    event.preventDefault();
-                    alert('Request body must be valid JSON. Use {{message}} where the alert text should go.');
-                    return;
-                }
-                config.body_template = bodyText;
-            }
-            configInput.value = JSON.stringify(config);
+            configInput.value = JSON.stringify({
+                url: webhookUrl.value,
+                method: 'POST',
+                body_template: webhookBody.value,
+            });
         }
     });
-
-    updateConfigVisibility();
 })();
 </script>
 {% endblock %}

@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from app.config import settings
+from app.config import settings, unifi_tls_verify
 
 logger = logging.getLogger(__name__)
 
@@ -16,12 +16,17 @@ class UnifiClient:
         self.site = settings.UNIFI_SITE
         self.username = settings.UNIFI_USERNAME
         self.password = settings.UNIFI_PASSWORD
-        self.verify_ssl = settings.UNIFI_VERIFY_SSL
+        self.verify_ssl = unifi_tls_verify()
         self.timeout = settings.UNIFI_TIMEOUT_SECONDS
         self.mock_mode = settings.UNIFI_MOCK_MODE
         self.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
         self._owns_client = shared_http is None
-        self.client = shared_http or httpx.Client(verify=self.verify_ssl, timeout=self.timeout)
+        self.client = shared_http or httpx.Client(
+            verify=self.verify_ssl,
+            timeout=self.timeout,
+            trust_env=False,
+            follow_redirects=False,
+        )
         self._logged_in = False
 
     def close(self) -> None:
@@ -119,7 +124,7 @@ def get_unifi_client() -> UnifiClient:
         _shared_client.site = settings.UNIFI_SITE
         _shared_client.username = settings.UNIFI_USERNAME
         _shared_client.password = settings.UNIFI_PASSWORD
-        _shared_client.verify_ssl = settings.UNIFI_VERIFY_SSL
+        _shared_client.verify_ssl = unifi_tls_verify()
     return _shared_client
 
 

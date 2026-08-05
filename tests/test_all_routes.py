@@ -11,7 +11,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from tests.conftest import basic_auth_header
+from tests.conftest import auth_headers
 
 # Use a single test database for everything
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
@@ -32,7 +32,7 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 
 client = TestClient(app)
-AUTH = basic_auth_header()
+AUTH = auth_headers()
 
 
 @pytest.fixture(autouse=True, scope="function")
@@ -194,8 +194,9 @@ def test_delete_channel():
     assert response.status_code == 200
 
 
+@patch("app.notifications.webhook.WebhookProvider.validate_config", return_value=True)
 @patch("app.notifications.webhook.WebhookProvider.send")
-def test_test_channel(mock_send):
+def test_test_channel(mock_send, _mock_validate):
     mock_send.return_value = (True, 200, "OK", None)
     response = client.post("/api/notifications/htmx/1/test", headers=AUTH)
     assert response.status_code == 200
@@ -285,6 +286,68 @@ def test_block_modal_escapes_device_fields():
     assert "&lt;img" in response.text
 
 
+def test_rename_escapes_display_name_html():
+    payload = '"><img src=x onerror=alert(1)>'
+    response = client.post(
+        "/htmx/devices/1/rename",
+        data={"display_name": payload},
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert "<img" not in response.text
+    assert "&lt;img" in response.text
+    assert "alert(1)" in response.text  # escaped text may remain, not as an attribute
+
+
+def test_notification_test_escapes_error_html(monkeypatch):
+    from app.notifications.secrets import encrypt_channel_config
+
+    db = TestingSessionLocal()
+    channel = db.query(NotificationChannel).filter(NotificationChannel.id == 1).first()
+    channel.config_json = encrypt_channel_config(
+        {"url": "https://hooks.example.com/x", "method": "POST"}
+    )
+    db.commit()
+    db.close()
+
+    class Boom:
+        def validate_config(self, config):
+            return True
+
+        def send(self, message, config):
+            return False, 0, "", '<script>alert("xss")</script>'
+
+    monkeypatch.setattr(
+        "app.api.routes_notifications.PROVIDERS",
+        {"webhook": Boom()},
+    )
+    monkeypatch.setattr(
+        "app.config.settings.WEBHOOK_ALLOWED_HOSTS",
+        "hooks.example.com",
+    )
+
+    response = client.post("/api/notifications/htmx/1/test", headers=AUTH)
+    assert response.status_code == 200
+    assert "<script>" not in response.text
+    assert "&lt;script&gt;" in response.text
+
+
+def test_export_csv_formula_escape():
+    db = TestingSessionLocal()
+    device = db.query(Device).filter(Device.id == 1).first()
+    device.hostname = "=1+1"
+    device.display_name = "+cmd"
+    device.vendor = "@SUM(A1)"
+    db.commit()
+    db.close()
+
+    response = client.get("/tools/export/csv", headers=AUTH)
+    assert response.status_code == 200
+    assert "'=1+1" in response.text
+    assert "'+cmd" in response.text
+    assert "'@SUM(A1)" in response.text
+
+
 def test_notifications():
     response = client.get("/notifications", headers=AUTH)
     assert response.status_code == 200
@@ -292,9 +355,11 @@ def test_notifications():
     assert "/api/notifications/htmx/1/delete" in response.text
     assert "/api/notifications/htmx/create" in response.text
     assert "User Key" in response.text
-    assert "HTTP Method" in response.text
+    assert "HTTP Method" not in response.text
     assert "JSON Request Body" in response.text
     assert "field-help-tip" in response.text
+    assert "/static/htmx.min.js" in client.get("/notifications", headers=AUTH).text
+    assert "unpkg.com" not in client.get("/notifications", headers=AUTH).text
 
 
 def test_tools():

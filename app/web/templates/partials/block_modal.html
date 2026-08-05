@@ -16,7 +16,7 @@
             {% endif %}
         </p>
         <div class="flex justify-end space-x-2">
-            <button onclick="document.getElementById('modal-container').remove()" class="bg-gray-300 text-gray-800 px-4 py-2 rounded">Cancel</button>
+            <button type="button" data-remove-el="modal-container" class="bg-gray-300 text-gray-800 px-4 py-2 rounded">Cancel</button>
             <button hx-post="/api/devices/htmx/{{ device.id }}/block" hx-target="#modal-container" hx-swap="delete" class="bg-red-600 text-white px-4 py-2 rounded font-bold">Block Device</button>
         </div>
     </div>

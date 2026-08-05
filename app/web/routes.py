@@ -1,3 +1,5 @@
+from html import escape
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session, joinedload
@@ -198,4 +200,5 @@ def htmx_rename(
         device.display_name = display_name
         log_action(db, device, "rename", {"old_name": old_name, "new_name": display_name})
         db.commit()
-    return HTMLResponse(f"<span id='name-{device_id}'>{display_name}</span>")
+    safe_name = escape(display_name)
+    return HTMLResponse(f"<span id='name-{device_id}'>{safe_name}</span>")

@@ -13,4 +13,5 @@ def nav_context(db: Session) -> dict:
 
 
 def template_context(db: Session, request, **kwargs) -> dict:
-    return {"request": request, **nav_context(db), **kwargs}
+    nonce = getattr(getattr(request, "state", None), "csp_nonce", "")
+    return {"request": request, "csp_nonce": nonce, **nav_context(db), **kwargs}

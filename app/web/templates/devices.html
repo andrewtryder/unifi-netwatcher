@@ -133,7 +133,7 @@
 </div>
 
 {% if devices %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
     const tbody = document.getElementById('inventory-tbody');
     const headers = document.querySelectorAll('.sortable-th');

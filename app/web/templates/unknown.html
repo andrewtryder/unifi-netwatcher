@@ -87,7 +87,7 @@
 </div>
 
 {% if devices %}
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
     const selectAll = document.getElementById('select-all');
     const checkboxes = () => Array.from(document.querySelectorAll('.device-select'));

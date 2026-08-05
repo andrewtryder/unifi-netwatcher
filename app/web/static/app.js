@@ -64,4 +64,28 @@
 
   updateRelativeTimes();
   setInterval(updateRelativeTimes, 60000);
+
+  document.addEventListener("click", (event) => {
+    const openBtn = event.target.closest("[data-modal-open]");
+    if (openBtn) {
+      document.getElementById(openBtn.getAttribute("data-modal-open"))?.classList.remove("hidden");
+    }
+    const closeBtn = event.target.closest("[data-modal-close]");
+    if (closeBtn) {
+      document.getElementById(closeBtn.getAttribute("data-modal-close"))?.classList.add("hidden");
+    }
+    const removeBtn = event.target.closest("[data-remove-el]");
+    if (removeBtn) {
+      document.getElementById(removeBtn.getAttribute("data-remove-el"))?.remove();
+    }
+  });
+
+  document.addEventListener("submit", (event) => {
+    const form = event.target;
+    if (!(form instanceof HTMLFormElement)) return;
+    const modalId = form.getAttribute("data-close-modal-on-submit");
+    if (modalId) {
+      document.getElementById(modalId)?.classList.add("hidden");
+    }
+  });
 })();

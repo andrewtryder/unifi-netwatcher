@@ -98,7 +98,11 @@ Copy `.env.example` to `.env` and adjust as needed. Notification channels (Pusho
 | `UNIFI_USERNAME` | UniFi account username. A dedicated account with only the permissions needed is recommended. |
 | `UNIFI_PASSWORD` | UniFi account password. |
 | `UNIFI_SITE` | UniFi site name (usually `default`). |
-| `UNIFI_VERIFY_SSL` | Verify the controller TLS certificate (`true`/`false`). Set `false` only on trusted LANs with self-signed certs. |
+| `UNIFI_VERIFY_SSL` | Verify the controller TLS certificate (default `true`). For a private CA, set `UNIFI_CA_BUNDLE` to a PEM file path. To disable verification you must also set `UNIFI_ALLOW_INSECURE_SSL=true` (trusted lab networks only). |
+| `UNIFI_CA_BUNDLE` | Optional path to a PEM CA bundle used when verifying the UniFi controller certificate. |
+| `UNIFI_ALLOW_INSECURE_SSL` | Required escape hatch when `UNIFI_VERIFY_SSL=false`. Default `false`; startup fails if verify is off without this flag (unless mock mode). |
+| `WEBHOOK_ALLOWED_HOSTS` | Comma-separated hostnames allowed for outbound HTTPS webhooks. Empty means webhooks are rejected (fail closed). |
+| `APP_SECRET_KEY` | Secret used to encrypt notification channel credentials at rest. Change from the sample value in production. |
 | `UNIFI_TIMEOUT_SECONDS` | HTTP timeout when calling the UniFi API. |
 | `SCAN_INTERVAL_SECONDS` | How often to poll the controller for clients (seconds). Default: `300`. Overridable in **Tools**. |
 | `ALERT_COOLDOWN_SECONDS` | Minimum time between repeat alerts for the same device (seconds). Default: `21600`. |
@@ -162,5 +166,6 @@ When set, CIDR filtering is bypassed only (authentication is unchanged; password
 
 - **Do not expose NetWatcher to the public internet** without understanding that auth is a single shared admin account (HTTP Basic) and that disabling auth grants full administrative access to every reachable client.
 - **Use a dedicated UniFi account** with only the permissions NetWatcher needs.
-- **`UNIFI_VERIFY_SSL=false`** should only be used on trusted LANs.
-- **Protect the data directory.** Notification secrets, UniFi configuration, and the password hash live under `./data`.
+- **`UNIFI_VERIFY_SSL=false`** requires `UNIFI_ALLOW_INSECURE_SSL=true` and should only be used on trusted LANs; prefer mounting a private CA via `UNIFI_CA_BUNDLE`.
+- **Webhook channels** only call HTTPS POST destinations whose hostname is listed in `WEBHOOK_ALLOWED_HOSTS`.
+- **Protect the data directory.** Notification secrets are encrypted with `APP_SECRET_KEY`; UniFi configuration and the password hash live under `./data`.

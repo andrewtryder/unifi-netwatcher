@@ -17,6 +17,7 @@ from app.models import (
     OuiEntry,
 )
 from app.notifications import PROVIDERS
+from app.notifications.secrets import decrypt_channel_config
 from app.unifi.client import get_unifi_client
 
 logger = logging.getLogger(__name__)
@@ -162,7 +163,11 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
             if not provider:
                 continue
 
-            config = json.loads(channel.config_json)
+            try:
+                config = decrypt_channel_config(channel.config_json)
+            except Exception:
+                logger.exception("Failed to decrypt config for channel %s", channel.id)
+                continue
             success, status_code, response, error = provider.send(intent.message, config)
 
             delivery = NotificationDelivery(

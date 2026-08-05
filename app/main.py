@@ -12,7 +12,7 @@ from app.api.routes_devices import router as devices_api_router
 from app.api.routes_import_export import router as tools_router
 from app.api.routes_notifications import router as notifications_router
 from app.api.routes_scans import router as scans_router
-from app.config import settings
+from app.config import settings, validate_unifi_tls_settings
 from app.db import SessionLocal
 from app.models import OuiEntry
 from app.notifications.http import close_notification_http_client
@@ -87,6 +87,8 @@ def reschedule_scan_job(seconds: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_unifi_tls_settings()
+
     # Run alembic migrations on startup
     alembic_cfg = alembic.config.Config("alembic.ini")
     alembic.command.upgrade(alembic_cfg, "head")

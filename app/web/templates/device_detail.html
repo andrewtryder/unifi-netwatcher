@@ -131,7 +131,7 @@
     </div>
 </div>
 
-<script>
+<script nonce="{{ csp_nonce }}">
 (function () {
     async function refreshDeviceFragments(deviceId) {
         const [badgeRes, actionsRes] = await Promise.all([

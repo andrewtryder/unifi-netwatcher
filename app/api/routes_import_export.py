@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.activity_log import record_event
 from app.api.routes_devices import log_action
+from app.config import settings
 from app.db import get_db
 from app.mac import normalize_mac
 from app.models import Device, Setting
@@ -26,6 +27,16 @@ router = APIRouter()
 
 PRESET_INTERVALS = {60, 300, 900, 1800, 3600}
 PRESET_RETENTION_DAYS = {0, 7, 30, 90, 180, 365}
+
+
+def _csv_safe(value) -> str:
+    """Prefix formula-like cells so spreadsheets do not execute them."""
+    if value is None:
+        return ""
+    text = str(value)
+    if text and text[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
 
 
 def _upsert_setting(db: Session, key: str, value: str) -> None:
@@ -183,16 +194,45 @@ def save_retention(
 async def import_trusted(
     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    content = await file.read()
-    text = content.decode("utf-8")
+    max_bytes = settings.IMPORT_MAX_BYTES
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(64 * 1024)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            return HTMLResponse(
+                "<div class='text-error font-bold mt-4'>Import file exceeds size limit.</div>",
+                status_code=400,
+            )
+        chunks.append(chunk)
+    content = b"".join(chunks)
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        return HTMLResponse(
+            "<div class='text-error font-bold mt-4'>Import file must be valid UTF-8.</div>",
+            status_code=400,
+        )
 
     imported_count = 0
     now = datetime.utcnow()
+    row_count = 0
 
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#"):
             continue
+
+        row_count += 1
+        if row_count > settings.IMPORT_MAX_ROWS:
+            return HTMLResponse(
+                "<div class='text-error font-bold mt-4'>Import exceeds maximum row count.</div>",
+                status_code=400,
+            )
 
         note = ""
         if "," in line:
@@ -243,7 +283,7 @@ def export_trusted(db: Session = Depends(get_db)):
     lines = ["# Trusted Devices Export"]
     for d in devices:
         name = d.display_name or d.hostname or d.notes or "Unknown"
-        lines.append(f"{d.mac} # {name}")
+        lines.append(f"{d.mac} # {_csv_safe(name)}")
     return "\n".join(lines) + "\n"
 
 
@@ -275,12 +315,12 @@ def export_csv(db: Session = Depends(get_db)):
                 d.id,
                 d.mac,
                 d.status,
-                d.ip,
-                d.hostname,
-                d.display_name,
-                d.vendor,
-                d.last_site,
-                d.last_ssid,
+                _csv_safe(d.ip),
+                _csv_safe(d.hostname),
+                _csv_safe(d.display_name),
+                _csv_safe(d.vendor),
+                _csv_safe(d.last_site),
+                _csv_safe(d.last_ssid),
                 d.first_seen_at.isoformat() if d.first_seen_at else "",
                 d.last_seen_at.isoformat() if d.last_seen_at else "",
             ]
