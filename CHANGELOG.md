@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.1...v0.3.2) (2026-09-20)
+
+
+### Bug Fixes
+
+* **security:** remediate CodeQL alert [#4](https://github.com/andrewtryder/unifi-netwatcher/issues/4) stack trace exposure ([#36](https://github.com/andrewtryder/unifi-netwatcher/issues/36)) ([03f942f](https://github.com/andrewtryder/unifi-netwatcher/commit/03f942fa0e9df5320f0cef83c63002da0ad90418))
+
 ## [0.3.1](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.0...v0.3.1) (2026-09-20)
 
 
