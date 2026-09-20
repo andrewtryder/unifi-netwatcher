@@ -1,4 +1,5 @@
 import json
+import logging
 from html import escape
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -17,6 +18,7 @@ from app.web.context import template_context
 from app.web.templates_env import templates
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _error_html(message: str, status_code: int = 400) -> HTMLResponse:
@@ -91,8 +93,9 @@ def test_channel(channel_id: int, db: Session = Depends(get_db)):
     try:
         config = load_channel_config(channel)
     except (SecretKeyError, ValueError, json.JSONDecodeError) as exc:
+        logger.warning("Failed to load channel config for channel %d: %s", channel_id, exc)
         return _error_html(
-            str(exc) if isinstance(exc, SecretKeyError) else "Stored channel config is invalid", 400
+            "Stored channel config is invalid or the encryption key has changed", 400
         )
 
     if not provider.validate_config(config):

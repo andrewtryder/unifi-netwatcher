@@ -152,7 +152,9 @@ def cmd_rekey(args: argparse.Namespace) -> int:
         except OSError:
             print(f"Warning: could not remove backup {bak}", file=sys.stderr)
 
-    print(f"Re-encrypted {count} notification channel(s) using new key ({source}).")
+    # Redact sensitive path info: only indicate source type, not the actual key file path.
+    safe_source = "env" if source == "env" else "file"
+    print(f"Re-encrypted {count} notification channel(s) using new key ({safe_source}).")
     return 0
 
 
