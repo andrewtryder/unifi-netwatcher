@@ -102,7 +102,7 @@ def cmd_rekey(args: argparse.Namespace) -> int:
     try:
         try:
             verify_channels_with_fernet(db, old_fernet)
-            count = rekey_notification_secrets(db, old_fernet=old_fernet, new_fernet=new_fernet)
+            rekey_notification_secrets(db, old_fernet=old_fernet, new_fernet=new_fernet)
         except Exception as exc:
             db.rollback()
             if staging_path is not None and staging_path.is_file():
@@ -155,12 +155,8 @@ def cmd_rekey(args: argparse.Namespace) -> int:
         except OSError:
             print(f"Warning: could not remove backup {bak}", file=sys.stderr)
 
-    # count is the number of DB rows updated — not key material.
-    # CodeQL incorrectly taints it because new_fernet was passed to rekey_notification_secrets().
-    # key_source_label is a plain string literal set independently of any secret data flow.
-    print(  # lgtm[py/clear-text-logging-sensitive-data]
-        f"Re-encrypted {count} notification channel(s) using new key ({key_source_label})."
-    )
+    # key_source_label is a plain string literal; no tainted variable is printed.
+    print(f"Re-encryption complete. Key source: {key_source_label}.")
     return 0
 
 
