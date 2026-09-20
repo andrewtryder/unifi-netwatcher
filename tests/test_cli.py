@@ -102,7 +102,13 @@ def test_rekey_wrong_old_key_leaves_files_and_db(rekey_env):
 
     key_path: Path = rekey_env["key_path"]
     active_before = key_path.read_bytes()
-    wrong = Fernet.generate_key().decode("ascii")
+    # Fernet keys are URL-safe base64 and can start with '-' or '_'.
+    # argparse would then treat the value as an unknown flag, causing sys.exit(2).
+    # Re-generate until we get a key that doesn't start with '-'.
+    while True:
+        wrong = Fernet.generate_key().decode("ascii")
+        if not wrong.startswith("-"):
+            break
     rc = main(
         [
             "rekey",
