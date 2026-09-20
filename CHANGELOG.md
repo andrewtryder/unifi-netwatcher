@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.1](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.0...v0.3.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **security:** remediate CodeQL alerts + bump all dependencies ([04d1036](https://github.com/andrewtryder/unifi-netwatcher/commit/04d1036d3c093688af30aff47f20dc4636352c57))
+
 ## [0.3.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.2.0...v0.3.0) (2026-08-05)
 
 

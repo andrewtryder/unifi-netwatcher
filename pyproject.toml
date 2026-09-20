@@ -1,6 +1,6 @@
 [project]
 name = "unifi-netwatcher"
-version = "0.3.0"
+version = "0.3.1"
 description = "Lightweight UniFi unknown-device monitor with WebUI and pluggable alerts"
 readme = "README.md"
 requires-python = ">=3.14"
