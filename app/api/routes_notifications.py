@@ -45,12 +45,8 @@ def create_channel(
     try:
         normalized = parse_notification_config(type, config_json)
     except (ValidationError, ValueError) as exc:
-        detail = "Invalid channel configuration"
-        if isinstance(exc, ValidationError) and exc.errors():
-            detail = exc.errors()[0].get("msg", detail)
-        elif isinstance(exc, ValueError):
-            detail = str(exc)
-        return _error_html(detail)
+        logger.warning("Invalid notification channel configuration for %s: %s", type, exc)
+        return _error_html("Invalid channel configuration")
 
     provider = PROVIDERS[type]
     if not provider.validate_config(normalized):

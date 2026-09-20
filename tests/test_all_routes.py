@@ -300,6 +300,16 @@ def test_notifications():
     assert "field-help-tip" in response.text
 
 
+def test_create_channel_invalid_config():
+    response = client.post(
+        "/api/notifications/htmx/create",
+        data={"name": "Test Webhook", "type": "webhook", "config_json": "invalid-json"},
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+    assert "Invalid channel configuration" in response.text
+
+
 def test_tools():
     response = client.get("/tools", headers=AUTH)
     assert response.status_code == 200
