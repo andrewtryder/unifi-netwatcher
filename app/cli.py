@@ -67,26 +67,29 @@ def cmd_rekey(args: argparse.Namespace) -> int:
     new_env = (args.new_key or os.environ.get("APP_SECRET_KEY") or "").strip()
     staging_path: Path | None = None
     rotate_file = False
-    source: str
+    # key_source_label is a plain literal used only for the success message.
+    # It is intentionally separate from any secret-derived variable so that
+    # no sensitive data flows into the printed output (CodeQL py/clear-text-logging-sensitive-data).
+    key_source_label: str
 
     if is_usable_env_secret(new_env):
         new_fernet = fernet_from_material(new_env.encode("utf-8"))
-        source = "env"
+        key_source_label = "env"
     elif args.generate_file:
         generated = Fernet.generate_key()
         staging_path = key_staging_path(key_path)
         write_key_file(staging_path, generated)
         new_fernet = Fernet(generated.strip())
         rotate_file = True
-        source = f"file:{key_path}"
+        key_source_label = "file"
     else:
         try:
-            new_fernet, resolved = resolve_fernet(
+            new_fernet, _resolved = resolve_fernet(
                 env_secret=new_env or None,
                 key_path=key_path,
                 allow_generate=False,
             )
-            source = resolved
+            key_source_label = "existing-file"
         except SecretKeyError:
             print(
                 "No usable new key. Set APP_SECRET_KEY, ensure the key file exists, "
@@ -152,9 +155,7 @@ def cmd_rekey(args: argparse.Namespace) -> int:
         except OSError:
             print(f"Warning: could not remove backup {bak}", file=sys.stderr)
 
-    # Redact sensitive path info: only indicate source type, not the actual key file path.
-    safe_source = "env" if source == "env" else "file"
-    print(f"Re-encrypted {count} notification channel(s) using new key ({safe_source}).")
+    print(f"Re-encrypted {count} notification channel(s) using new key ({key_source_label}).")
     return 0
 
 
