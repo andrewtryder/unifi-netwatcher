@@ -29,6 +29,129 @@
         {% endfor %}
     </div>
 
+    <!-- Behavioral Notification Rules -->
+    <div class="glass-panel rounded-xl p-6 flex flex-col gap-6">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-outline pb-4">
+            <div>
+                <h2 class="text-lg font-semibold text-on-surface">Behavioral Notification Rules</h2>
+                <p class="text-xs text-on-surface-variant mt-0.5">
+                    Configure which device behavioral transitions trigger alerts to your active channels.
+                    All behavioral alerts are disabled by default.
+                </p>
+            </div>
+            <div id="rules-feedback"></div>
+        </div>
+
+        <form hx-post="/api/notifications/htmx/rules" hx-target="#rules-feedback" hx-swap="innerHTML" class="flex flex-col gap-5">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <!-- Disconnection Rule -->
+                <label class="flex items-start gap-3 p-3.5 rounded-lg border border-outline bg-surface-variant/20 hover:bg-surface-variant/40 cursor-pointer transition-colors">
+                    <input type="checkbox" name="notify_device_disconnected" value="true"
+                           {% if rules and rules.notify_device_disconnected %}checked{% endif %}
+                           class="mt-1 rounded border-outline text-primary focus:ring-primary">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-base text-error">cloud_off</span>
+                            Device Disconnected
+                        </span>
+                        <span class="text-xs text-on-surface-variant mt-0.5">
+                            Alert when an online device misses consecutive scans and exceeds the grace period.
+                        </span>
+                    </div>
+                </label>
+
+                <!-- Reconnection Rule -->
+                <label class="flex items-start gap-3 p-3.5 rounded-lg border border-outline bg-surface-variant/20 hover:bg-surface-variant/40 cursor-pointer transition-colors">
+                    <input type="checkbox" name="notify_device_reconnected" value="true"
+                           {% if rules and rules.notify_device_reconnected %}checked{% endif %}
+                           class="mt-1 rounded border-outline text-primary focus:ring-primary">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-base text-secondary">wifi</span>
+                            Device Reconnected
+                        </span>
+                        <span class="text-xs text-on-surface-variant mt-0.5">
+                            Alert when a previously offline device returns and is seen online.
+                        </span>
+                    </div>
+                </label>
+
+                <!-- SSID Change Rule -->
+                <label class="flex items-start gap-3 p-3.5 rounded-lg border border-outline bg-surface-variant/20 hover:bg-surface-variant/40 cursor-pointer transition-colors">
+                    <input type="checkbox" name="notify_device_ssid_changed" value="true"
+                           {% if rules and rules.notify_device_ssid_changed %}checked{% endif %}
+                           class="mt-1 rounded border-outline text-primary focus:ring-primary">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-base text-primary">cell_tower</span>
+                            Wi-Fi SSID Changed
+                        </span>
+                        <span class="text-xs text-on-surface-variant mt-0.5">
+                            Alert when a wireless device transitions to a different SSID network.
+                        </span>
+                    </div>
+                </label>
+
+                <!-- Access Point Change Rule -->
+                <label class="flex items-start gap-3 p-3.5 rounded-lg border border-outline bg-surface-variant/20 hover:bg-surface-variant/40 cursor-pointer transition-colors">
+                    <input type="checkbox" name="notify_device_ap_changed" value="true"
+                           {% if rules and rules.notify_device_ap_changed %}checked{% endif %}
+                           class="mt-1 rounded border-outline text-primary focus:ring-primary">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-base text-primary">router</span>
+                            Access Point Roamed
+                        </span>
+                        <span class="text-xs text-on-surface-variant mt-0.5">
+                            Alert when a wireless device roams to another UniFi access point.
+                        </span>
+                    </div>
+                </label>
+
+                <!-- Network/IP Change Rule -->
+                <label class="flex items-start gap-3 p-3.5 rounded-lg border border-outline bg-surface-variant/20 hover:bg-surface-variant/40 cursor-pointer transition-colors md:col-span-2">
+                    <input type="checkbox" name="notify_device_network_changed" value="true"
+                           {% if rules and rules.notify_device_network_changed %}checked{% endif %}
+                           class="mt-1 rounded border-outline text-primary focus:ring-primary">
+                    <div class="flex flex-col">
+                        <span class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                            <span class="material-symbols-outlined text-base text-primary">lan</span>
+                            Network / IP Changed
+                        </span>
+                        <span class="text-xs text-on-surface-variant mt-0.5">
+                            Alert when a device changes IP address or subnet without disconnecting.
+                        </span>
+                    </div>
+                </label>
+            </div>
+
+            <!-- Cooldown Settings -->
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-4 border-t border-outline">
+                <div class="flex flex-col gap-1 max-w-md">
+                    <label for="cooldown_seconds" class="text-sm font-medium text-on-surface flex items-center gap-1.5">
+                        Alert Cooldown Window (seconds)
+                        <span class="field-help" tabindex="0">
+                            <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
+                            <span class="field-help-tip">Minimum interval before another alert is sent for the same device and event type. Reconnection alerts are tracked independently and are never suppressed by prior disconnections. Default is 3600 (1 hour).</span>
+                        </span>
+                    </label>
+                    <span class="text-xs text-on-surface-variant">
+                        Suppresses rapid alert flapping. Independent per device and event type.
+                    </span>
+                </div>
+                <div class="flex items-center gap-3">
+                    <input type="number" id="cooldown_seconds" name="cooldown_seconds"
+                           value="{{ rules.cooldown_seconds if rules else 3600 }}" min="0" max="604800"
+                           class="w-32 bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary p-2 font-mono">
+                    <button type="submit"
+                            class="bg-primary hover:bg-primary/90 text-background font-medium px-4 py-2 rounded-lg transition-colors text-sm whitespace-nowrap">
+                        Save Rules
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+
     <!-- Create Modal (Hidden by default) -->
     <div id="create-modal" class="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
         <div class="glass-panel w-full max-w-md rounded-xl shadow-2xl overflow-hidden border border-outline">

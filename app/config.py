@@ -82,6 +82,14 @@ class Settings(BaseSettings):
     SCAN_INTERVAL_SECONDS: int = Field(default=300, ge=1, le=86400)
     ALERT_COOLDOWN_SECONDS: int = Field(default=21600, ge=0, le=604800)
 
+    # Behavioral Notification Rules (all disabled by default; Web UI can override)
+    NOTIFY_DEVICE_DISCONNECTED: StrictBool = False
+    NOTIFY_DEVICE_RECONNECTED: StrictBool = False
+    NOTIFY_DEVICE_SSID_CHANGED: StrictBool = False
+    NOTIFY_DEVICE_AP_CHANGED: StrictBool = False
+    NOTIFY_DEVICE_NETWORK_CHANGED: StrictBool = False
+    BEHAVIORAL_ALERT_COOLDOWN_SECONDS: int = Field(default=3600, ge=0, le=604800)
+
     DEVICE_OFFLINE_MISSED_SCANS: int = Field(default=2, ge=2, le=100)
     DEVICE_OFFLINE_GRACE_SECONDS: int = Field(default=600, ge=0, le=604800)
 

@@ -21,6 +21,11 @@ from app.models import (
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
 from app.services.connectivity import ConnectivityService, resolve_offline_thresholds
+from app.services.notifications import (
+    batch_devices_in_cooldown,
+    format_behavioral_alert_message,
+    get_behavioral_notification_rules,
+)
 from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
 from app.unifi.status import sanitize_unifi_error
@@ -37,6 +42,8 @@ class AlertIntent:
     device_id: int
     mac: str
     message: str
+    event_type: str = "discovered"
+    source_event_id: int | None = None
 
 
 _as_int = as_int
@@ -101,16 +108,24 @@ def _devices_in_alert_cooldown(db: Session, device_ids: list[int], now: datetime
     cooldown = timedelta(seconds=settings.ALERT_COOLDOWN_SECONDS)
     cutoff = now - cooldown
     rows = (
-        db.query(Event.device_id)
+        db.query(Event.device_id, Event.metadata_json)
         .filter(
             Event.device_id.in_(device_ids),
             Event.event_type == "alert_sent",
             Event.created_at >= cutoff,
         )
-        .distinct()
         .all()
     )
-    return {row[0] for row in rows if row[0] is not None}
+    in_cooldown = set()
+    for row in rows:
+        dev_id = row[0]
+        meta = row[1]
+        alert_event_type = (
+            meta.get("event_type", "discovered") if isinstance(meta, dict) else "discovered"
+        )
+        if alert_event_type == "discovered" and dev_id is not None:
+            in_cooldown.add(dev_id)
+    return in_cooldown
 
 
 def _alert_message(device: Device) -> str:
@@ -133,10 +148,40 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
         return
 
     for intent in intents:
+        # Idempotency check: if alerts were already successfully sent for this source_event_id, skip.
+        if intent.source_event_id is not None:
+            existing_deliveries = (
+                db.query(NotificationDelivery)
+                .join(Event, NotificationDelivery.event_id == Event.id)
+                .filter(
+                    Event.device_id == intent.device_id,
+                    Event.event_type == "alert_queued",
+                    NotificationDelivery.success.is_(True),
+                )
+                .all()
+            )
+            already_sent = any(
+                isinstance(deliv.event.metadata_json, dict)
+                and deliv.event.metadata_json.get("source_event_id") == intent.source_event_id
+                for deliv in existing_deliveries
+                if deliv.event is not None
+            )
+            if already_sent:
+                logger.debug(
+                    "Skipping duplicate alert delivery for device %s source event %s",
+                    intent.device_id,
+                    intent.source_event_id,
+                )
+                continue
+
         queued_event = Event(
             device_id=intent.device_id,
             event_type="alert_queued",
             message=f"Queued alerts for {len(channels)} channels",
+            metadata_json={
+                "event_type": intent.event_type,
+                "source_event_id": intent.source_event_id,
+            },
         )
         db.add(queued_event)
         db.flush()
@@ -191,6 +236,11 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
                     device_id=intent.device_id,
                     event_type="alert_sent",
                     message=f"Sent {sent_count} alerts",
+                    metadata_json={
+                        "event_type": intent.event_type,
+                        "source_event_id": intent.source_event_id,
+                        "sent_count": sent_count,
+                    },
                 )
             )
         else:
@@ -199,6 +249,10 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
                     device_id=intent.device_id,
                     event_type="alert_failed",
                     message="All alerts failed",
+                    metadata_json={
+                        "event_type": intent.event_type,
+                        "source_event_id": intent.source_event_id,
+                    },
                 )
             )
 
@@ -300,6 +354,8 @@ def _run_scan_locked(db: Session, source: str) -> dict:
             missed_scans_threshold=missed_threshold,
             grace_seconds=grace_threshold,
         )
+        rules = get_behavioral_notification_rules(db)
+        behavioral_cooldown_pairs: set[tuple[int, str]] = set()
 
         # First pass: upsert devices/observations; apply connectivity updates for observed clients
         unknown_candidates: list[Device] = []
@@ -358,16 +414,40 @@ def _run_scan_locked(db: Session, source: str) -> dict:
 
                 transition = connectivity.handle_observed_device(device, now)
                 if transition and transition.event_type:
-                    db.add(
-                        Event(
-                            device_id=device.id,
-                            event_type=transition.event_type,
-                            severity="info",
-                            message=transition.event_message,
-                            metadata_json=transition.event_metadata,
-                            created_at=now,
-                        )
+                    event = Event(
+                        device_id=device.id,
+                        event_type=transition.event_type,
+                        severity="info",
+                        message=transition.event_message,
+                        metadata_json=transition.event_metadata,
+                        created_at=now,
                     )
+                    db.add(event)
+                    db.flush()
+                    if rules.is_enabled(transition.event_type):
+                        active_cooldowns = batch_devices_in_cooldown(
+                            db,
+                            [(device.id, transition.event_type)],
+                            rules.cooldown_seconds,
+                            now,
+                        )
+                        pair = (device.id, transition.event_type)
+                        if pair not in active_cooldowns and pair not in behavioral_cooldown_pairs:
+                            alert_intents.append(
+                                AlertIntent(
+                                    device_id=device.id,
+                                    mac=device.mac,
+                                    message=format_behavioral_alert_message(
+                                        transition.event_type,
+                                        device,
+                                        transition.event_metadata,
+                                        now,
+                                    ),
+                                    event_type=transition.event_type,
+                                    source_event_id=event.id,
+                                )
+                            )
+                            behavioral_cooldown_pairs.add(pair)
 
             db.add(
                 Observation(
@@ -409,16 +489,40 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         for device in absent_devices:
             transition = connectivity.handle_absent_device(device, now)
             if transition and transition.event_type:
-                db.add(
-                    Event(
-                        device_id=device.id,
-                        event_type=transition.event_type,
-                        severity="info",
-                        message=transition.event_message,
-                        metadata_json=transition.event_metadata,
-                        created_at=now,
-                    )
+                event = Event(
+                    device_id=device.id,
+                    event_type=transition.event_type,
+                    severity="info",
+                    message=transition.event_message,
+                    metadata_json=transition.event_metadata,
+                    created_at=now,
                 )
+                db.add(event)
+                db.flush()
+                if rules.is_enabled(transition.event_type):
+                    active_cooldowns = batch_devices_in_cooldown(
+                        db,
+                        [(device.id, transition.event_type)],
+                        rules.cooldown_seconds,
+                        now,
+                    )
+                    pair = (device.id, transition.event_type)
+                    if pair not in active_cooldowns and pair not in behavioral_cooldown_pairs:
+                        alert_intents.append(
+                            AlertIntent(
+                                device_id=device.id,
+                                mac=device.mac,
+                                message=format_behavioral_alert_message(
+                                    transition.event_type,
+                                    device,
+                                    transition.event_metadata,
+                                    now,
+                                ),
+                                event_type=transition.event_type,
+                                source_event_id=event.id,
+                            )
+                        )
+                        behavioral_cooldown_pairs.add(pair)
 
         cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
         for device in unknown_candidates:
