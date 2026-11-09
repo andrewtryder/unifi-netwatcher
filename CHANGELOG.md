@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.4.0...v0.5.0) (2026-11-09)
+
+
+### Features
+
+* **devices:** add connection history and timeline UI ([#66](https://github.com/andrewtryder/unifi-netwatcher/issues/66)) ([518d168](https://github.com/andrewtryder/unifi-netwatcher/commit/518d168ad478de08f6f84710a4326f2a1dc0d9bd))
+* **devices:** add independent connectivity state and transition events ([#61](https://github.com/andrewtryder/unifi-netwatcher/issues/61)) ([1f46f27](https://github.com/andrewtryder/unifi-netwatcher/commit/1f46f275d5e85ee4c273399daebcc75b3aa3383f))
+* **devices:** track roaming and network changes ([#65](https://github.com/andrewtryder/unifi-netwatcher/issues/65)) ([fbf9eb0](https://github.com/andrewtryder/unifi-netwatcher/commit/fbf9eb0b4e895a972ce663bfcbe70be9b51d3714))
+* **notifications:** add configurable behavioral notification rules ([#64](https://github.com/andrewtryder/unifi-netwatcher/issues/64)) ([91930f8](https://github.com/andrewtryder/unifi-netwatcher/commit/91930f8d8c0bd7eba2de586080077bee4668ecbe))
+
 ## [0.4.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.2...v0.4.0) (2026-11-09)
 
 
