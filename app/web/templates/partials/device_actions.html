@@ -1,4 +1,4 @@
-<div class="flex items-center gap-3" id="device-actions"{% if oob %} hx-swap-oob="true"{% endif %}>
+<div class="flex items-center gap-3 flex-wrap" id="device-actions"{% if oob %} hx-swap-oob="true"{% endif %}>
     {% if device.status != 'trusted' %}
     <button type="button" data-device-action="trust" data-device-id="{{ device.id }}"
             class="inline-flex items-center gap-1.5 bg-secondary/10 hover:bg-secondary/20 text-secondary border border-secondary/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
@@ -19,6 +19,35 @@
         <span class="material-symbols-outlined text-[16px]">restart_alt</span> Reset Status
     </button>
     {% endif %}
+
+    {% if device.status == 'blocked' %}
+        {% if adapter_capabilities and not adapter_capabilities.can_unblock %}
+        <button type="button" disabled title="Client unblocking is not supported by the active UniFi API mode"
+                class="inline-flex items-center gap-1.5 opacity-50 cursor-not-allowed bg-surface-variant text-on-surface-variant border border-outline font-medium px-4 py-2 rounded-lg text-sm">
+            <span class="material-symbols-outlined text-[16px]">lock_open</span> Unblock
+            <span class="text-[10px] bg-outline/20 px-1.5 py-0.5 rounded text-on-surface-variant">Unavailable</span>
+        </button>
+        {% else %}
+        <button type="button" data-device-action="unblock" data-device-id="{{ device.id }}"
+                class="inline-flex items-center gap-1.5 bg-warning/10 hover:bg-warning/20 text-warning border border-warning/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+            <span class="material-symbols-outlined text-[16px]">lock_open</span> Unblock
+        </button>
+        {% endif %}
+    {% else %}
+        {% if adapter_capabilities and not adapter_capabilities.can_block %}
+        <button type="button" disabled title="Client blocking is not supported by the active UniFi API mode"
+                class="inline-flex items-center gap-1.5 opacity-50 cursor-not-allowed bg-surface-variant text-on-surface-variant border border-outline font-medium px-4 py-2 rounded-lg text-sm">
+            <span class="material-symbols-outlined text-[16px]">block</span> Block
+            <span class="text-[10px] bg-outline/20 px-1.5 py-0.5 rounded text-on-surface-variant">Unavailable</span>
+        </button>
+        {% else %}
+        <button type="button" hx-get="/api/devices/htmx/{{ device.id }}/block_modal" hx-target="body" hx-swap="beforeend"
+                class="inline-flex items-center gap-1.5 text-error hover:bg-error/10 border border-error/20 font-medium px-4 py-2 rounded-lg transition-colors text-sm">
+            <span class="material-symbols-outlined text-[16px]">block</span> Block
+        </button>
+        {% endif %}
+    {% endif %}
+
     <button type="button" data-device-action="delete" data-device-id="{{ device.id }}" data-device-mac="{{ device.mac }}"
             class="inline-flex items-center gap-1.5 bg-error hover:bg-error/90 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm">
         <span class="material-symbols-outlined text-[16px]">delete</span> Delete

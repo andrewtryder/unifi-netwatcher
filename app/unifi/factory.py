@@ -5,7 +5,7 @@ import logging
 from app.config import settings
 from app.unifi.base import UniFiAdapter
 from app.unifi.legacy import LegacyUniFiAdapter
-from app.unifi.models import UniFiAuthError, UniFiPermissionError
+from app.unifi.models import UniFiAuthError, UniFiCapabilities, UniFiPermissionError
 from app.unifi.official import OfficialUniFiAdapter
 
 logger = logging.getLogger(__name__)
@@ -64,3 +64,19 @@ def close_unifi_adapter() -> None:
     if _shared_adapter is not None:
         _shared_adapter.close()
         _shared_adapter = None
+
+
+def get_adapter_info() -> tuple[str, str, UniFiCapabilities]:
+    """Return (configured_mode, active_adapter, capabilities) without network calls or probing."""
+    configured_mode = (settings.UNIFI_API_MODE or "legacy").strip().lower()
+    global _shared_adapter
+    if _shared_adapter is not None:
+        if isinstance(_shared_adapter, OfficialUniFiAdapter):
+            return configured_mode, "official", _shared_adapter.capabilities
+        return configured_mode, "legacy", _shared_adapter.capabilities
+
+    if configured_mode == "official":
+        return configured_mode, "official", OfficialUniFiAdapter.capabilities
+    if configured_mode == "legacy":
+        return configured_mode, "legacy", LegacyUniFiAdapter.capabilities
+    return configured_mode, "unresolved", UniFiCapabilities()

@@ -20,6 +20,10 @@ class DeviceActionError(Exception):
     pass
 
 
+class UnsupportedDeviceActionError(DeviceActionError):
+    """Raised when a requested action is unsupported by the active UniFi adapter capabilities."""
+
+
 def _truncate(value: str | None, limit: int = _MAX_DETAIL_LEN) -> str | None:
     if value is None:
         return None
@@ -176,6 +180,10 @@ class DeviceService:
     def block(self, device_id: int) -> Device:
         device = self.get_or_raise(device_id)
         client = get_unifi_client()
+        if not client.capabilities.can_block:
+            raise UnsupportedDeviceActionError(
+                "Client blocking is not supported by the active UniFi API mode."
+            )
         if not client.block_client(device.mac):
             raise DeviceActionError("Failed to execute block on controller")
         device.status = "blocked"
@@ -192,6 +200,10 @@ class DeviceService:
     def unblock(self, device_id: int) -> Device:
         device = self.get_or_raise(device_id)
         client = get_unifi_client()
+        if not client.capabilities.can_unblock:
+            raise UnsupportedDeviceActionError(
+                "Client unblocking is not supported by the active UniFi API mode."
+            )
         if not client.unblock_client(device.mac):
             raise DeviceActionError("Failed to execute unblock on controller")
         device.status = "unknown"

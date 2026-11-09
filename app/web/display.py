@@ -202,3 +202,40 @@ def build_dashboard_metrics(db: Session) -> dict:
         "attention_devices": attention_devices,
         "online_count": len(online),
     }
+
+
+def format_adapter_name(adapter: str | None) -> str:
+    """Format internal adapter identifier into human-readable label."""
+    if not adapter:
+        return "Unresolved"
+    mapping = {
+        "official": "Official Network Integration API",
+        "legacy": "Legacy Controller API",
+        "unresolved": "Unresolved (Pending First Scan)",
+    }
+    return mapping.get(str(adapter).lower(), str(adapter).title())
+
+
+def format_mode_name(mode: str | None) -> str:
+    """Format configured API mode into human-readable label."""
+    if not mode:
+        return "Legacy"
+    mapping = {
+        "auto": "Auto-Detect",
+        "official": "Official API",
+        "legacy": "Legacy Controller",
+    }
+    return mapping.get(str(mode).lower(), str(mode).title())
+
+
+def format_connection_state_label(state: str | None) -> str:
+    """Format connection state into human-readable label."""
+    if not state:
+        return "Unknown"
+    mapping = {
+        "successful": "Operational",
+        "failed": "Connection Issue",
+        "degraded": "Degraded",
+        "unknown": "Idle (No Scans Yet)",
+    }
+    return mapping.get(str(state).lower(), str(state).title())

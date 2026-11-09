@@ -11,8 +11,10 @@ from app.services.devices import (
     DeviceActionError,
     DeviceNotFoundError,
     DeviceService,
+    UnsupportedDeviceActionError,
     log_action,
 )
+from app.unifi.factory import get_unifi_adapter
 from app.web.context import template_context
 from app.web.templates_env import templates
 
@@ -115,12 +117,48 @@ def update_device_notes(
     return {"status": "success", "device_id": device.id}
 
 
+@router.post("/{device_id}/block")
+def block_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        device = _service(request, db).block(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
+    except UnsupportedDeviceActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DeviceActionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    db.commit()
+    return {"status": "success", "device_id": device.id}
+
+
+@router.post("/{device_id}/unblock")
+def unblock_device(request: Request, device_id: int, db: Session = Depends(get_db)):
+    try:
+        device = _service(request, db).unblock(device_id)
+    except DeviceNotFoundError as exc:
+        raise _map_not_found(exc) from exc
+    except UnsupportedDeviceActionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DeviceActionError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    db.commit()
+    return {"status": "success", "device_id": device.id}
+
+
 @router.get("/htmx/{device_id}/block_modal")
 def block_modal(request: Request, device_id: int, db: Session = Depends(get_db)):
     try:
         device = _service(request, db).get_or_raise(device_id)
     except DeviceNotFoundError as exc:
         raise _map_not_found(exc) from exc
+
+    adapter = get_unifi_adapter()
+    if not adapter.capabilities.can_block:
+        return HTMLResponse(
+            "<div class='p-4 text-error text-sm'>Client blocking is not supported by the active UniFi API mode.</div>",
+            status_code=409,
+        )
+
     return templates.TemplateResponse(
         request=request,
         name="partials/block_modal.html",
@@ -138,6 +176,11 @@ def block_device_action(request: Request, device_id: int, db: Session = Depends(
         device = _service(request, db).block(device_id)
     except DeviceNotFoundError as exc:
         raise _map_not_found(exc) from exc
+    except UnsupportedDeviceActionError as exc:
+        return HTMLResponse(
+            f"<div class='p-4 text-error text-sm'>{exc}</div>",
+            status_code=409,
+        )
     except DeviceActionError:
         return HTMLResponse(
             "<div class='p-4 text-error text-sm'>Failed to execute block on controller.</div>",
@@ -157,6 +200,11 @@ def unblock_device_action(request: Request, device_id: int, db: Session = Depend
         device = _service(request, db).unblock(device_id)
     except DeviceNotFoundError as exc:
         raise _map_not_found(exc) from exc
+    except UnsupportedDeviceActionError as exc:
+        return HTMLResponse(
+            f"<div class='p-4 text-error text-sm'>{exc}</div>",
+            status_code=409,
+        )
     except DeviceActionError:
         return HTMLResponse(
             "<div class='p-4 text-error text-sm'>Failed to execute unblock on controller.</div>",
