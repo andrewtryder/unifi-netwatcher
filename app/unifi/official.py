@@ -158,7 +158,11 @@ class OfficialUniFiAdapter(UniFiAdapter):
                     if resp_limit <= 0:
                         raise UniFiResponseError(f"Invalid sites pagination limit: {resp_limit}")
 
-                    total_count = as_int(payload.get("totalCount"))
+                    total_count = (
+                        as_int(payload.get("totalCount"))
+                        if payload.get("totalCount") is not None
+                        else as_int(payload.get("total_count"))
+                    )
                     if total_count is not None and total_count < 0:
                         raise UniFiResponseError(
                             f"Invalid negative totalCount in sites pagination: {total_count}"
@@ -368,7 +372,11 @@ class OfficialUniFiAdapter(UniFiAdapter):
                 if resp_limit <= 0:
                     raise UniFiResponseError(f"Invalid pagination limit: {resp_limit}")
 
-                total_count = as_int(payload.get("totalCount"))
+                total_count = (
+                    as_int(payload.get("totalCount"))
+                    if payload.get("totalCount") is not None
+                    else as_int(payload.get("total_count"))
+                )
                 if total_count is not None and total_count < 0:
                     raise UniFiResponseError(
                         f"Invalid negative totalCount in pagination: {total_count}"
