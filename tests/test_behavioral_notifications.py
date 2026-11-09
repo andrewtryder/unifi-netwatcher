@@ -16,7 +16,12 @@ from app.models import (
     NotificationChannel,
     NotificationDelivery,
 )
-from app.scanner import AlertIntent, _deliver_queued_alerts, run_scan
+from app.scanner import (
+    AlertIntent,
+    _deliver_pending_alerts,
+    _deliver_queued_alerts,
+    run_scan,
+)
 from app.security.service import invalidate_security_cache
 from app.services.notifications import (
     BehavioralNotificationRules,
@@ -892,3 +897,208 @@ def test_notifications_page_renders_rules_section():
     assert "Device Reconnected" in resp.text
     assert "Alert Cooldown Window" in resp.text
     assert 'value="1800"' in resp.text
+
+
+def test_per_channel_retry_and_deduplication(monkeypatch):
+    """If one channel fails while another succeeds, retry only attempts the failed channel."""
+    db = TestingSessionLocal()
+    now = utcnow()
+
+    device = Device(mac="aa:bb:cc:11:22:33", hostname="multi-channel-device")
+    db.add(device)
+    source_event = Event(device_id=device.id, event_type="device_disconnected", created_at=now)
+    db.add(source_event)
+    db.commit()
+
+    ch1 = NotificationChannel(
+        name="channel-1-success",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/ch1"},
+    )
+    ch2 = NotificationChannel(
+        name="channel-2-flaky",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/ch2"},
+    )
+    db.add_all([ch1, ch2])
+    db.commit()
+
+    ch2_should_fail = True
+    ch1_calls: list[str] = []
+    ch2_calls: list[str] = []
+
+    class MockMultiProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            url = cfg.get("url")
+            if "ch1" in url:
+                ch1_calls.append(msg)
+                return True, 200, "ok", ""
+            if "ch2" in url:
+                ch2_calls.append(msg)
+                if ch2_should_fail:
+                    return False, 500, "internal error", "Server error"
+                return True, 200, "recovered", ""
+            return False, 0, "", "unknown"
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockMultiProvider()})
+
+    intent = AlertIntent(
+        device_id=device.id,
+        mac=device.mac,
+        message="Device disconnected alert",
+        event_type="device_disconnected",
+        source_event_id=source_event.id,
+    )
+
+    # First pass: ch1 succeeds, ch2 fails
+    _deliver_queued_alerts(db, [intent])
+    assert len(ch1_calls) == 1
+    assert len(ch2_calls) == 1
+
+    # Verify deliveries in DB
+    delivs = db.query(NotificationDelivery).all()
+    assert len(delivs) == 2
+    d1 = next(d for d in delivs if d.channel_id == ch1.id)
+    d2 = next(d for d in delivs if d.channel_id == ch2.id)
+    assert d1.success is True
+    assert d2.success is False
+
+    # Second pass (retry): ch2 recovers
+    ch2_should_fail = False
+    _deliver_pending_alerts(db)
+
+    # ch1 must NOT be called again (deduplicated per channel!)
+    assert len(ch1_calls) == 1
+    # ch2 WAS called again and succeeded!
+    assert len(ch2_calls) == 2
+
+    delivs_after = db.query(NotificationDelivery).all()
+    assert len(delivs_after) == 3
+    d2_retry = [d for d in delivs_after if d.channel_id == ch2.id and d.success is True]
+    assert len(d2_retry) == 1
+
+    # Third pass: everything already succeeded, nothing to do
+    _deliver_pending_alerts(db)
+    assert len(ch1_calls) == 1
+    assert len(ch2_calls) == 2
+    db.close()
+
+
+def test_delivery_budget_and_batch_limits(monkeypatch):
+    """Delivery runner respects batch limits and defers remaining queued alerts."""
+    db = TestingSessionLocal()
+    now = utcnow()
+
+    sent_calls: list[str] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            sent_calls.append(msg)
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    channel = NotificationChannel(
+        name="test-batch-channel",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/batch"},
+    )
+    db.add(channel)
+
+    # Create 5 queued alert events directly in DB
+    for i in range(5):
+        dev = Device(mac=f"00:11:22:33:44:{i:02d}", hostname=f"dev-{i}")
+        db.add(dev)
+        db.flush()
+        db.add(
+            Event(
+                device_id=dev.id,
+                event_type="alert_queued",
+                message=f"Alert for dev {i}",
+                metadata_json={"source_event_id": 100 + i, "event_type": "device_disconnected"},
+                created_at=now + timedelta(seconds=i),
+            )
+        )
+    db.commit()
+
+    # Run with batch_limit=2
+    attempted = _deliver_pending_alerts(db, batch_limit=2)
+    assert attempted == 2
+    assert len(sent_calls) == 2
+
+    # Run again with batch_limit=2 -> next 2 processed
+    attempted_2 = _deliver_pending_alerts(db, batch_limit=2)
+    assert attempted_2 == 2
+    assert len(sent_calls) == 4
+
+    # Run again with batch_limit=2 -> final 1 processed
+    attempted_3 = _deliver_pending_alerts(db, batch_limit=2)
+    assert attempted_3 == 1
+    assert len(sent_calls) == 5
+
+    # Run again -> nothing remaining
+    attempted_4 = _deliver_pending_alerts(db, batch_limit=2)
+    assert attempted_4 == 0
+    assert len(sent_calls) == 5
+    db.close()
+
+
+def test_durable_recovery_after_process_restart(monkeypatch):
+    """Pending alert_queued events in SQLite are cleanly delivered even without in-memory scan state."""
+    db = TestingSessionLocal()
+    now = utcnow()
+
+    delivered: list[str] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            delivered.append(msg)
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    channel = NotificationChannel(
+        name="durable-channel",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/durable"},
+    )
+    dev = Device(mac="aa:bb:cc:99:88:77", hostname="persisted-alert-dev")
+    db.add_all([channel, dev])
+    db.flush()
+
+    # Simulate an alert_queued event that was committed before a crash/restart
+    db.add(
+        Event(
+            device_id=dev.id,
+            event_type="alert_queued",
+            message="Persisted alert before crash",
+            metadata_json={"source_event_id": 999, "event_type": "device_disconnected"},
+            created_at=now,
+        )
+    )
+    db.commit()
+
+    # Recovery pass (e.g. at startup or on next scan pass)
+    _deliver_pending_alerts(db)
+
+    assert len(delivered) == 1
+    assert delivered[0] == "Persisted alert before crash"
+
+    deliv = db.query(NotificationDelivery).first()
+    assert deliv is not None
+    assert deliv.success is True
+    assert deliv.channel_id == channel.id
+    db.close()
