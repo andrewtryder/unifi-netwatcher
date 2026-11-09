@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 from app.models import Device
 from app.scanner import _apply_telemetry, _client_telemetry
@@ -65,7 +65,7 @@ def test_display_helpers():
         is_wired=False,
         channel=6,
         rssi=-77,
-        last_seen_at=datetime.utcnow(),
+        last_seen_at=datetime.now(UTC),
     )
     assert device_display_name(d) == "UniFi Name"
     d.display_name = "My Phone"

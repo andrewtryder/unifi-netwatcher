@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
 from app.models import Device, Event, NotificationChannel, Observation
+from app.schemas import RenameRequest
 from app.services.context import request_context_from_request
 from app.services.devices import DeviceNotFoundError, DeviceService
 from app.web.context import template_context
@@ -166,8 +167,6 @@ def htmx_scan_status(request: Request, db: Session = Depends(get_db)):
 def _get_device_or_404(db: Session, device_id: int) -> Device:
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=404, detail="Device not found")
     return device
 
@@ -217,8 +216,6 @@ def htmx_ignore(request: Request, device_id: int, db: Session = Depends(get_db))
 def htmx_rename(
     request: Request, device_id: int, display_name: str = Form(...), db: Session = Depends(get_db)
 ):
-    from app.schemas import RenameRequest
-
     try:
         name = RenameRequest(display_name=display_name).display_name
         DeviceService(db, request_context_from_request(request)).rename(device_id, name)
