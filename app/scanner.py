@@ -600,6 +600,46 @@ def _run_scan_locked(db: Session, source: str) -> dict:
                 db.flush()
                 devices_by_mac[mac] = device
             else:
+                # Detect network transitions (SSID, AP roaming, IP) for active online devices
+                net_transitions = connectivity.detect_network_transitions(
+                    device, ip, ssid, ap_mac, now
+                )
+                for net_t in net_transitions:
+                    net_ev = Event(
+                        device_id=device.id,
+                        event_type=net_t.event_type,
+                        severity="info",
+                        message=net_t.event_message,
+                        metadata_json=net_t.event_metadata,
+                        created_at=now,
+                    )
+                    db.add(net_ev)
+                    db.flush()
+                    if rules.is_enabled(net_t.event_type):
+                        active_cooldowns = batch_devices_in_cooldown(
+                            db,
+                            [(device.id, net_t.event_type)],
+                            rules.cooldown_seconds,
+                            now,
+                        )
+                        pair = (device.id, net_t.event_type)
+                        if pair not in active_cooldowns and pair not in behavioral_cooldown_pairs:
+                            alert_intents.append(
+                                AlertIntent(
+                                    device_id=device.id,
+                                    mac=device.mac,
+                                    message=format_behavioral_alert_message(
+                                        net_t.event_type,
+                                        device,
+                                        net_t.event_metadata,
+                                        now,
+                                    ),
+                                    event_type=net_t.event_type,
+                                    source_event_id=net_ev.id,
+                                )
+                            )
+                            behavioral_cooldown_pairs.add(pair)
+
                 device.last_seen_at = now
                 if hostname:
                     device.hostname = hostname

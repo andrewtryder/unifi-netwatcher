@@ -26,6 +26,17 @@ class ConnectivityTransition:
     event_metadata: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class NetworkTransition:
+    """Represents an SSID, AP, or IP change for an active online device."""
+
+    device_id: int
+    mac: str
+    event_type: str
+    event_message: str
+    event_metadata: dict[str, Any]
+
+
 def resolve_offline_thresholds(db: Any | None = None) -> tuple[int, int]:
     """Resolve offline detection thresholds, checking database Setting overrides first."""
     missed_scans = settings.DEVICE_OFFLINE_MISSED_SCANS
@@ -147,6 +158,100 @@ class ConnectivityService:
 
         # Rule B — Device remains online
         return None
+
+    def detect_network_transitions(
+        self,
+        device: Device,
+        observed_ip: str | None,
+        observed_ssid: str | None,
+        observed_ap_mac: str | None,
+        now: datetime,
+    ) -> list[NetworkTransition]:
+        """Detect SSID, access point roaming, or IP address changes for an already online device.
+
+        Safeguards:
+        - Only evaluated if device is already confirmed ONLINE (avoids baseline & reconnection flapping).
+        - Ignores None/empty/missing metadata (avoids flapping from transient UniFi omissions).
+        - Preserves normalized comparison for AP MACs.
+        - Returns list of transitions to record atomically with the scan transaction.
+        """
+        transitions: list[NetworkTransition] = []
+        if (device.connectivity_state or "") != ConnectivityState.ONLINE.value:
+            return transitions
+
+        display_name = device.display_name or device.hostname or device.name or device.mac
+
+        # 1. SSID transition
+        if device.last_ssid and observed_ssid:
+            old_ssid = device.last_ssid.strip()
+            new_ssid = observed_ssid.strip()
+            if old_ssid and new_ssid and old_ssid != new_ssid:
+                msg = f"Device SSID changed: {display_name} ({old_ssid} -> {new_ssid})"
+                meta = {
+                    "old_ssid": old_ssid,
+                    "new_ssid": new_ssid,
+                    "mac": device.mac,
+                    "ip": observed_ip or device.ip,
+                }
+                logger.info("Device %s SSID changed: %s -> %s", device.mac, old_ssid, new_ssid)
+                transitions.append(
+                    NetworkTransition(
+                        device_id=device.id,
+                        mac=device.mac,
+                        event_type="device_ssid_changed",
+                        event_message=msg,
+                        event_metadata=meta,
+                    )
+                )
+
+        # 2. Access Point roaming transition
+        if device.last_ap_mac and observed_ap_mac:
+            from app.mac import normalize_mac
+
+            old_ap = normalize_mac(device.last_ap_mac)
+            new_ap = normalize_mac(observed_ap_mac)
+            if old_ap and new_ap and old_ap != new_ap:
+                msg = f"Device roamed to AP: {display_name} ({old_ap} -> {new_ap})"
+                meta = {
+                    "old_ap_mac": old_ap,
+                    "new_ap_mac": new_ap,
+                    "mac": device.mac,
+                    "ssid": observed_ssid or device.last_ssid,
+                }
+                logger.info("Device %s roamed AP: %s -> %s", device.mac, old_ap, new_ap)
+                transitions.append(
+                    NetworkTransition(
+                        device_id=device.id,
+                        mac=device.mac,
+                        event_type="device_ap_changed",
+                        event_message=msg,
+                        event_metadata=meta,
+                    )
+                )
+
+        # 3. IP address transition
+        if device.ip and observed_ip:
+            old_ip = device.ip.strip()
+            new_ip = observed_ip.strip()
+            if old_ip and new_ip and old_ip != new_ip:
+                msg = f"Device IP changed: {display_name} ({old_ip} -> {new_ip})"
+                meta = {
+                    "old_ip": old_ip,
+                    "new_ip": new_ip,
+                    "mac": device.mac,
+                }
+                logger.info("Device %s IP changed: %s -> %s", device.mac, old_ip, new_ip)
+                transitions.append(
+                    NetworkTransition(
+                        device_id=device.id,
+                        mac=device.mac,
+                        event_type="device_network_changed",
+                        event_message=msg,
+                        event_metadata=meta,
+                    )
+                )
+
+        return transitions
 
     def handle_absent_device(self, device: Device, now: datetime) -> ConnectivityTransition | None:
         """Rules C, D, & F: Device absent from a successful complete scan.
