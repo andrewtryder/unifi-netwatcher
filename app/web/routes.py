@@ -98,6 +98,17 @@ def device_inventory(
     )
 
 
+TIMELINE_EVENT_TYPES = (
+    "discovered",
+    "device_connected",
+    "device_disconnected",
+    "device_reconnected",
+    "device_ssid_changed",
+    "device_ap_changed",
+    "device_network_changed",
+)
+
+
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
 def device_detail(request: Request, device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
@@ -110,10 +121,89 @@ def device_detail(request: Request, device_id: int, db: Session = Depends(get_db
         .limit(50)
         .all()
     )
+    timeline_events = (
+        db.query(Event)
+        .filter(
+            Event.device_id == device.id,
+            Event.event_type.in_(TIMELINE_EVENT_TYPES),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(30)
+        .all()
+    )
+    has_more_timeline = (
+        db.query(Event)
+        .filter(
+            Event.device_id == device.id,
+            Event.event_type.in_(TIMELINE_EVENT_TYPES),
+        )
+        .offset(30)
+        .limit(1)
+        .count()
+        > 0
+    )
+    next_timeline_offset = 30 if has_more_timeline else None
+
     return templates.TemplateResponse(
         request=request,
         name="device_detail.html",
-        context=template_context(db, request, device=device, observations=observations),
+        context=template_context(
+            db,
+            request,
+            device=device,
+            observations=observations,
+            timeline_events=timeline_events,
+            next_timeline_offset=next_timeline_offset,
+        ),
+    )
+
+
+@router.get("/htmx/devices/{device_id}/timeline", response_class=HTMLResponse)
+def htmx_device_timeline(
+    request: Request,
+    device_id: int,
+    offset: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        return HTMLResponse("Not Found", status_code=404)
+
+    events = (
+        db.query(Event)
+        .filter(
+            Event.device_id == device.id,
+            Event.event_type.in_(TIMELINE_EVENT_TYPES),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    has_more = (
+        db.query(Event)
+        .filter(
+            Event.device_id == device.id,
+            Event.event_type.in_(TIMELINE_EVENT_TYPES),
+        )
+        .offset(offset + len(events))
+        .limit(1)
+        .count()
+        > 0
+    )
+    next_offset = offset + len(events) if has_more else None
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/device_timeline_items.html",
+        context=template_context(
+            db,
+            request,
+            device=device,
+            events=events,
+            next_offset=next_offset,
+        ),
     )
 
 

@@ -1,6 +1,7 @@
 from fastapi.templating import Jinja2Templates
 
 from app.config import settings
+from app.services.notifications import format_duration
 from app.web.display import (
     bytes_r_to_mbps,
     connection_subtitle,
@@ -19,6 +20,7 @@ templates = Jinja2Templates(directory="app/web/templates")
 templates.env.filters["relative_ago"] = lambda dt, parens=False: format_relative_ago(
     dt, parens=parens
 )
+templates.env.filters["format_duration"] = format_duration
 templates.env.globals.update(
     {
         "device_display_name": device_display_name,

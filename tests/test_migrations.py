@@ -115,3 +115,17 @@ def test_migration_connectivity_backfill_and_reversibility(tmp_path: Path, monke
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("devices")}
     assert "connectivity_state" in cols
+
+    event_indexes = {idx["name"] for idx in insp.get_indexes("events")}
+    assert "ix_events_device_id_created_at" in event_indexes
+
+    # Test downgrade and upgrade of the timeline index
+    alembic.command.downgrade(cfg, "a7b8c9d0e1f2")
+    insp = inspect(engine)
+    event_indexes = {idx["name"] for idx in insp.get_indexes("events")}
+    assert "ix_events_device_id_created_at" not in event_indexes
+
+    alembic.command.upgrade(cfg, "head")
+    insp = inspect(engine)
+    event_indexes = {idx["name"] for idx in insp.get_indexes("events")}
+    assert "ix_events_device_id_created_at" in event_indexes
