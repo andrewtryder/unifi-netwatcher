@@ -13,6 +13,7 @@ from app.api.routes_devices import router as devices_api_router
 from app.api.routes_import_export import router as tools_router
 from app.api.routes_notifications import router as notifications_router
 from app.api.routes_scans import router as scans_router
+from app.api.routes_unifi import router as unifi_router
 from app.config import settings
 from app.db import SessionLocal
 from app.models import OuiEntry
@@ -151,7 +152,10 @@ async def lifespan(app: FastAPI):
     scheduler.start()
 
     # Warm shared HTTP clients (closed on shutdown)
-    get_unifi_client()
+    try:
+        get_unifi_client()
+    except Exception as exc:
+        logger.warning("Initial UniFi adapter warmup deferred or encountered error: %s", exc)
 
     # Check if OUI DB is empty and trigger immediate download if so
     db = SessionLocal()
@@ -182,6 +186,7 @@ app.mount("/static", StaticFiles(directory="app/web/static"), name="static")
 # Include routers
 app.include_router(web_router, tags=["web"])
 app.include_router(scans_router, prefix="/api/scan", tags=["scans"])
+app.include_router(unifi_router, prefix="/api/unifi", tags=["unifi"])
 app.include_router(devices_api_router, prefix="/api/devices", tags=["devices"])
 app.include_router(notifications_router, prefix="/api/notifications", tags=["notifications"])
 app.include_router(tools_router, prefix="/tools", tags=["tools"])

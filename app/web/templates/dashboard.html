@@ -4,8 +4,22 @@
     <div class="flex items-center justify-between">
         <h1 class="text-2xl lg:text-3xl font-bold tracking-tight text-on-surface">Network Overview</h1>
         <div class="flex items-center gap-2 px-3 py-1.5 rounded-full glass-panel text-sm font-medium">
+            {% if unifi_status.connection_state == 'successful' %}
             <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
-            <span class="text-secondary">Live Monitoring</span>
+            <span class="text-secondary">Controller Connected</span>
+            {% elif unifi_status.connection_state == 'degraded' %}
+            <span class="w-2 h-2 rounded-full bg-warning"></span>
+            <span class="text-warning">Scan Data Stale</span>
+            {% elif unifi_status.connection_state == 'failed' %}
+            <span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
+            <span class="text-error">Controller Disconnected</span>
+            {% elif unifi_status.mock_mode %}
+            <span class="w-2 h-2 rounded-full bg-info"></span>
+            <span class="text-info">Simulated Monitoring</span>
+            {% else %}
+            <span class="w-2 h-2 rounded-full bg-outline"></span>
+            <span class="text-on-surface-variant">Monitoring Idle</span>
+            {% endif %}
         </div>
     </div>
 
@@ -56,22 +70,63 @@
         </div>
     </div>
 
-    <!-- Scanner Status -->
+    <!-- UniFi Connection & Scanner -->
     <div class="glass-panel rounded-xl p-6 mt-4">
-        <div class="flex items-center gap-3 mb-6">
-            <span class="material-symbols-outlined text-primary">radar</span>
-            <h2 class="text-lg font-semibold">Scanner Status</h2>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-outline">
+            <div class="flex items-center gap-3">
+                <span class="material-symbols-outlined text-primary">router</span>
+                <div>
+                    <h2 class="text-lg font-semibold text-on-surface">UniFi Connection & Scanner</h2>
+                    <p class="text-xs text-on-surface-variant">API integration status, adapter capabilities, and scan health</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+                {% if unifi_status.mock_mode %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-info/10 text-info border border-info/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-info"></span> Mock Mode
+                </span>
+                {% endif %}
+                {% if unifi_status.dry_run_blocks %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-warning/10 text-warning border border-warning/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-warning"></span> Dry-Run Blocks
+                </span>
+                {% endif %}
+                {% if unifi_status.connection_state == 'successful' %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Operational
+                </span>
+                {% elif unifi_status.connection_state == 'degraded' %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-warning/10 text-warning border border-warning/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-warning"></span> Stale Scan Data
+                </span>
+                {% elif unifi_status.connection_state == 'failed' %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-error"></span> Connection Issue
+                </span>
+                {% else %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">
+                    <span class="w-1.5 h-1.5 rounded-full bg-outline"></span> No Scans Yet
+                </span>
+                {% endif %}
+            </div>
         </div>
 
-        <div class="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div class="flex flex-col lg:flex-row gap-6 justify-between items-start">
             {% include "partials/scan_status.html" %}
 
-            <div class="flex-shrink-0 flex flex-col items-stretch md:items-end gap-2">
+            <div class="flex-shrink-0 w-full lg:w-auto flex flex-col items-stretch lg:items-end gap-3 pt-2">
                 <p id="scan-feedback" class="hidden text-sm font-medium"></p>
                 <button id="scan-button"
-                        class="w-full md:w-auto flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-background font-medium px-6 py-3 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
-                    <span class="material-symbols-outlined text-sm">sync</span>
+                        class="w-full lg:w-auto flex items-center justify-center gap-2 bg-primary hover:bg-primary/90 disabled:opacity-60 disabled:cursor-not-allowed text-background font-medium px-5 py-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background text-sm">
+                    <span class="material-symbols-outlined text-base">sync</span>
                     <span class="scan-label">Trigger Manual Scan</span>
+                </button>
+
+                <p id="test-feedback" class="hidden text-sm font-medium"></p>
+                <button id="test-connection-button"
+                        class="w-full lg:w-auto flex items-center justify-center gap-2 bg-surface-variant hover:bg-surface-variant/80 text-on-surface border border-outline disabled:opacity-60 disabled:cursor-not-allowed font-medium px-5 py-2.5 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-primary text-sm">
+                    <span class="material-symbols-outlined text-base">sensors_check</span>
+                    <span class="test-label">Test UniFi Connection</span>
                 </button>
             </div>
         </div>

@@ -7,6 +7,9 @@ from app.web.display import (
     device_display_name,
     device_fingerprint_subtitle,
     device_icon,
+    format_adapter_name,
+    format_connection_state_label,
+    format_mode_name,
     satisfaction_color_class,
 )
 from app.web.formatting import format_relative_ago
@@ -23,6 +26,9 @@ templates.env.globals.update(
         "connection_subtitle": connection_subtitle,
         "satisfaction_color_class": satisfaction_color_class,
         "bytes_r_to_mbps": bytes_r_to_mbps,
+        "format_adapter_name": format_adapter_name,
+        "format_mode_name": format_mode_name,
+        "format_connection_state_label": format_connection_state_label,
     }
 )
 # Disable Jinja bytecode cache only in development (template hot-reload).

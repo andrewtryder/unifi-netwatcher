@@ -154,6 +154,28 @@ Uses the official Ubiquiti REST Integration API (v1) with `X-API-KEY` header aut
 #### Auto Mode (`UNIFI_API_MODE=auto`)
 Conservative capability probe: selects `official` mode if `UNIFI_API_KEY` is present and verified; falls back to `legacy` mode if unconfigured. Never silently switches between adapters on authentication or permission errors.
 
+### Connection Diagnostics & Capability-Aware UI
+
+NetWatcher features a **UniFi Connection & Scanner** diagnostics panel on the dashboard:
+
+* **API Integration Details**: Shows configured mode (`Legacy`, `Official`, or `Auto-Detect`), active adapter, and configured site.
+* **Health & Scan History**: Differentiates between background scanner health and application uptime. Shows latest scan timestamp, scan result, last successful scan, and sanitized error messages.
+* **Declared Capabilities**: Explicitly lists features supported by the active adapter:
+  | Capability | Legacy API Mode | Official API Mode |
+  |---|---|---|
+  | Client Inventory | Supported | Supported |
+  | Client Blocking | Supported | Not Supported |
+  | Client Unblocking | Supported | Not Supported |
+  | Wi-Fi Telemetry | Available | Not Available |
+  | Switch-Port Details | Available | Not Available |
+  | API Pagination | Not Supported | Supported |
+* **On-Demand Connection Testing**: Click **Test UniFi Connection** in the dashboard (or send an authenticated `POST /api/unifi/test-connection`) to run an immediate, isolated credential and reachability test. This test does not alter device inventory, record monitoring events, or dispatch alerts.
+* **Server-Side Capability Enforcement**: If an action is not supported by the active adapter (e.g. attempting to block a client while running the official API), both the UI buttons are disabled with explanatory badges, and backend API routes reject the request with `HTTP 409 Conflict` without modifying device status or database state. Core workflows (Trust, Ignore, Reset, Delete, Rename) remain completely functional across all API modes.
+* **Health vs Readiness vs Controller Connectivity**:
+  * `/healthz`: Application process is running and responding to HTTP requests.
+  * `/readyz`: Database connection and schema migrations are healthy. Controller disconnection does not fail readiness checks or trigger container restarts.
+  * `/api/unifi/status`: Authenticated endpoint returning full UniFi integration and connection diagnostic metadata.
+
 ## Releases
 
 Versioning is automated with [Release Please](https://github.com/googleapis/release-please) using [Conventional Commits](https://www.conventionalcommits.org/). Merge the Release PR on `main` to cut a release and publish images to both registries.

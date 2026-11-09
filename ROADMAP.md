@@ -95,16 +95,19 @@ Every phase and pull request must strictly adhere to these architectural constra
 
 #### Implementation Pull Requests
 - **PR 1**: `refactor(unifi): introduce adapter interface and scan reliability` ([PR #58](https://github.com/andrewtryder/unifi-netwatcher/pull/58) — Merged).
-- **PR 2**: `feat(unifi): support official network API and API key authentication` ([PR #59](https://github.com/andrewtryder/unifi-netwatcher/pull/59) — Complete, Pending Review).
-- **PR 3**: `feat(unifi): expose adapter capabilities and connection status in UI` (Status badges, connection test, documentation).
+- **PR 2**: `feat(unifi): support official network API and API key authentication` ([PR #59](https://github.com/andrewtryder/unifi-netwatcher/pull/59) — Merged).
+- **PR 3**: `feat(unifi): expose adapter capabilities and connection status in UI` (Connection & capabilities dashboard panel, isolated connection test, server/UI capability enforcement, sanitized diagnostics — Complete, Pending Review).
 
 #### Acceptance Criteria
-- [ ] Existing legacy installations operate with zero configuration changes.
-- [ ] Official API mode successfully synchronizes single-site client inventory.
-- [ ] Empty sites produce successful scans without error events or disconnection misclassifications.
-- [ ] Controller network errors and authentication failures trigger `scan_failed` with explicit error detail.
-- [ ] API keys and passwords are masked and never logged.
-- [ ] 100% test pass rate with coverage maintained above 80%.
+- [x] Existing legacy installations operate with zero configuration changes.
+- [x] Official API mode successfully synchronizes single-site client inventory.
+- [x] Empty sites produce successful scans without error events or disconnection misclassifications.
+- [x] Controller network errors and authentication failures trigger `scan_failed` with explicit error detail.
+- [x] API keys and passwords are masked and never logged.
+- [x] UI exposes configured API mode, active adapter, connection health, and declared capabilities.
+- [x] Isolated "Test UniFi Connection" action runs on-demand without mutating devices or dispatching alerts.
+- [x] Server-side routes and UI actions gracefully reject unsupported capabilities (e.g. Official mode blocking) with HTTP 409 Conflict without altering device state.
+- [x] 100% test pass rate with coverage maintained above 80% (achieved 85.84%).
 
 ---
 
