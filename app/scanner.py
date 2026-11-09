@@ -18,6 +18,7 @@ from app.models import (
 )
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
+from app.services.connectivity import ConnectivityService, resolve_offline_thresholds
 from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
 from app.unifi.status import sanitize_unifi_error
@@ -249,14 +250,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         return {"success": False, "message": message, "devices_processed": 0}
 
     now = utcnow()
-
-    if not clients_data:
-        message = "Scan completed: 0 active clients on UniFi site"
-        logger.info(message)
-        scan_finish_event = Event(event_type="scan_finished", severity="info", message=message)
-        db.add(scan_finish_event)
-        db.commit()
-        return {"success": True, "message": message, "devices_processed": 0}
+    clients_data = clients_data or []
 
     # Normalize MACs and prepare batch lookups
     prepared: list[tuple[str, dict]] = []
@@ -275,7 +269,14 @@ def _run_scan_locked(db: Session, source: str) -> dict:
     devices_by_mac = _batch_load_devices(db, macs)
     oui_by_prefix = _batch_load_oui_vendors(db, prefixes)
 
-    # First pass: upsert devices/observations; collect unknown device ids for cooldown
+    # Instantiate connectivity service with resolved thresholds
+    missed_threshold, grace_threshold = resolve_offline_thresholds(db)
+    connectivity = ConnectivityService(
+        missed_scans_threshold=missed_threshold,
+        grace_seconds=grace_threshold,
+    )
+
+    # First pass: upsert devices/observations; apply connectivity updates for observed clients
     unknown_candidates: list[Device] = []
     for mac, c in prepared:
         ip = c.get("ip")
@@ -310,6 +311,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
                 last_ap_mac=ap_mac,
                 **{k: v for k, v in telemetry.items() if v is not None},
             )
+            connectivity.handle_discovered_device(device, now)
             db.add(device)
             db.flush()
             devices_by_mac[mac] = device
@@ -328,6 +330,19 @@ def _run_scan_locked(db: Session, source: str) -> dict:
             if ap_mac:
                 device.last_ap_mac = ap_mac
             _apply_telemetry(device, telemetry)
+
+            transition = connectivity.handle_observed_device(device, now)
+            if transition and transition.event_type:
+                db.add(
+                    Event(
+                        device_id=device.id,
+                        event_type=transition.event_type,
+                        severity="info",
+                        message=transition.event_message,
+                        metadata_json=transition.event_metadata,
+                        created_at=now,
+                    )
+                )
 
         db.add(
             Observation(
@@ -356,6 +371,27 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         if device.status == "unknown":
             unknown_candidates.append(device)
 
+    # Second pass: evaluate absent devices for offline transitions
+    observed_mac_set = set(macs)
+    if observed_mac_set:
+        absent_devices = db.query(Device).filter(Device.mac.notin_(observed_mac_set)).all()
+    else:
+        absent_devices = db.query(Device).all()
+
+    for device in absent_devices:
+        transition = connectivity.handle_absent_device(device, now)
+        if transition and transition.event_type:
+            db.add(
+                Event(
+                    device_id=device.id,
+                    event_type=transition.event_type,
+                    severity="info",
+                    message=transition.event_message,
+                    metadata_json=transition.event_metadata,
+                    created_at=now,
+                )
+            )
+
     cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
     alert_intents: list[AlertIntent] = []
     for device in unknown_candidates:
@@ -372,7 +408,11 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         # Prevent duplicate intents for the same device within one scan
         cooldown_ids.add(device.id)
 
-    message = f"Scan finished ({source}). Processed {len(clients_data)} clients."
+    if not clients_data:
+        message = f"Scan completed: 0 active clients on UniFi site ({source})"
+    else:
+        message = f"Scan finished ({source}). Processed {len(clients_data)} clients."
+
     db.add(Event(event_type="scan_finished", severity="info", message=message))
     db.commit()
     logger.info("Scan finished successfully")

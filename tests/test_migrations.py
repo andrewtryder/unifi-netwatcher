@@ -55,3 +55,63 @@ def test_alembic_upgrade_from_initial_revision(tmp_path: Path, monkeypatch):
     assert "security_settings" in insp.get_table_names()
     cols = {c["name"] for c in insp.get_columns("security_settings")}
     assert "host_restriction_enabled" in cols
+
+    device_cols = {c["name"] for c in insp.get_columns("devices")}
+    assert "connectivity_state" in device_cols
+    assert "last_connected_at" in device_cols
+    assert "last_disconnected_at" in device_cols
+    assert "consecutive_missed_scans" in device_cols
+    assert "offline_candidate_since" in device_cols
+
+    device_indexes = {idx["name"] for idx in insp.get_indexes("devices")}
+    assert "ix_devices_connectivity_state" in device_indexes
+
+
+def test_migration_connectivity_backfill_and_reversibility(tmp_path: Path, monkeypatch):
+    """Test upgrading a database with existing devices and downgrading."""
+    db_path = tmp_path / "devices_migrate.db"
+    url = f"sqlite:///{db_path}"
+    monkeypatch.setenv("DATABASE_URL", url)
+    cfg = alembic.config.Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    # Upgrade to the revision immediately prior to connectivity tracking
+    alembic.command.upgrade(cfg, "f6a7b8c9d0e1")
+
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO devices (mac, hostname, ip, status, created_at, updated_at) "
+                "VALUES ('aa:bb:cc:dd:ee:ff', 'pre-existing-device', '192.168.1.50', 'trusted', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            )
+        )
+
+    # Upgrade to head (adds connectivity columns and constraints)
+    alembic.command.upgrade(cfg, "head")
+
+    with engine.connect() as conn:
+        row = (
+            conn.execute(
+                text(
+                    "SELECT mac, status, connectivity_state, consecutive_missed_scans FROM devices WHERE mac = 'aa:bb:cc:dd:ee:ff'"
+                )
+            )
+            .mappings()
+            .one()
+        )
+        assert row["status"] == "trusted"
+        assert row["connectivity_state"] == "unknown"
+        assert row["consecutive_missed_scans"] == 0
+
+    # Downgrade to prior revision
+    alembic.command.downgrade(cfg, "f6a7b8c9d0e1")
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("devices")}
+    assert "connectivity_state" not in cols
+
+    # Upgrade back to head
+    alembic.command.upgrade(cfg, "head")
+    insp = inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("devices")}
+    assert "connectivity_state" in cols

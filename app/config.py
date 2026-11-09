@@ -82,6 +82,9 @@ class Settings(BaseSettings):
     SCAN_INTERVAL_SECONDS: int = Field(default=300, ge=1, le=86400)
     ALERT_COOLDOWN_SECONDS: int = Field(default=21600, ge=0, le=604800)
 
+    DEVICE_OFFLINE_MISSED_SCANS: int = Field(default=2, ge=2, le=100)
+    DEVICE_OFFLINE_GRACE_SECONDS: int = Field(default=600, ge=0, le=604800)
+
     OBSERVATION_RETENTION_DAYS: int = Field(default=30, ge=0, le=3650)
     EVENT_RETENTION_DAYS: int = Field(default=90, ge=0, le=3650)
 

@@ -176,9 +176,9 @@ def block_device_action(request: Request, device_id: int, db: Session = Depends(
         device = _service(request, db).block(device_id)
     except DeviceNotFoundError as exc:
         raise _map_not_found(exc) from exc
-    except UnsupportedDeviceActionError as exc:
+    except UnsupportedDeviceActionError:
         return HTMLResponse(
-            f"<div class='p-4 text-error text-sm'>{exc}</div>",
+            "<div class='p-4 text-error text-sm'>Client blocking is not supported by the active UniFi API adapter.</div>",
             status_code=409,
         )
     except DeviceActionError:
@@ -200,9 +200,9 @@ def unblock_device_action(request: Request, device_id: int, db: Session = Depend
         device = _service(request, db).unblock(device_id)
     except DeviceNotFoundError as exc:
         raise _map_not_found(exc) from exc
-    except UnsupportedDeviceActionError as exc:
+    except UnsupportedDeviceActionError:
         return HTMLResponse(
-            f"<div class='p-4 text-error text-sm'>{exc}</div>",
+            "<div class='p-4 text-error text-sm'>Client unblocking is not supported by the active UniFi API adapter.</div>",
             status_code=409,
         )
     except DeviceActionError:
