@@ -3,8 +3,9 @@ import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -108,7 +109,7 @@ def _devices_in_alert_cooldown(db: Session, device_ids: list[int], now: datetime
         return set()
     cooldown = timedelta(seconds=settings.ALERT_COOLDOWN_SECONDS)
     cutoff = now - cooldown
-    rows = (
+    sent_rows = (
         db.query(Event.device_id, Event.metadata_json)
         .filter(
             Event.device_id.in_(device_ids),
@@ -117,8 +118,27 @@ def _devices_in_alert_cooldown(db: Session, device_ids: list[int], now: datetime
         )
         .all()
     )
+    delivery_rows = (
+        db.query(Event.device_id, Event.metadata_json)
+        .join(NotificationDelivery, NotificationDelivery.event_id == Event.id)
+        .filter(
+            Event.device_id.in_(device_ids),
+            NotificationDelivery.success.is_(True),
+            NotificationDelivery.created_at >= cutoff,
+        )
+        .all()
+    )
+    queued_rows = (
+        db.query(Event.device_id, Event.metadata_json)
+        .filter(
+            Event.device_id.in_(device_ids),
+            Event.event_type == "alert_queued",
+            Event.created_at >= cutoff,
+        )
+        .all()
+    )
     in_cooldown = set()
-    for row in rows:
+    for row in sent_rows + delivery_rows + queued_rows:
         dev_id = row[0]
         meta = row[1]
         alert_event_type = (
@@ -141,6 +161,8 @@ def _alert_message(device: Device) -> str:
 
 DEFAULT_ALERT_BATCH_LIMIT = 15
 DEFAULT_ALERT_BUDGET_SECONDS = 15.0
+DEFAULT_ALERT_EXPIRATION_HOURS = 48
+DEFAULT_ALERT_EXPIRATION_SECONDS = DEFAULT_ALERT_EXPIRATION_HOURS * 3600
 MAX_CHANNEL_ATTEMPTS = 3
 
 
@@ -193,6 +215,7 @@ def _deliver_pending_alerts(
     *,
     batch_limit: int = DEFAULT_ALERT_BATCH_LIMIT,
     budget_seconds: float = DEFAULT_ALERT_BUDGET_SECONDS,
+    expiration_seconds: float = DEFAULT_ALERT_EXPIRATION_SECONDS,
 ) -> int:
     """Deliver pending alert_queued events to enabled channels with bounded budget and per-channel tracking.
 
@@ -202,13 +225,29 @@ def _deliver_pending_alerts(
     if not channels:
         return 0
 
-    # Bounded lookback to recover recent pending work without scanning ancient events
-    cutoff = utcnow() - timedelta(hours=24)
+    enabled_channel_ids = [c.id for c in channels]
+
+    # Subquery of event_ids that already have successful deliveries for ALL enabled channels
+    fully_delivered_event_ids = (
+        db.query(NotificationDelivery.event_id)
+        .filter(
+            NotificationDelivery.channel_id.in_(enabled_channel_ids),
+            NotificationDelivery.success.is_(True),
+        )
+        .group_by(NotificationDelivery.event_id)
+        .having(func.count(distinct(NotificationDelivery.channel_id)) >= len(enabled_channel_ids))
+    )
+
+    # Pending-work-aware query: excludes completed events so they cannot starve newer pending work
     queued_events = (
         db.query(Event)
         .filter(
             Event.event_type == "alert_queued",
-            Event.created_at >= cutoff,
+            Event.id.not_in(fully_delivered_event_ids),
+            or_(
+                Event.metadata_json["resolved"].as_boolean().is_(False),
+                Event.metadata_json["resolved"].as_boolean().is_(None),
+            ),
         )
         .order_by(Event.created_at.asc(), Event.id.asc())
         .limit(50)
@@ -229,10 +268,59 @@ def _deliver_pending_alerts(
                 attempt_counts.get((d.event_id, d.channel_id), 0) + 1
             )
 
+    now = utcnow()
     deadline = time.monotonic() + budget_seconds
     deliveries_attempted = 0
 
     for q_event in queued_events:
+        meta = dict(q_event.metadata_json or {}) if isinstance(q_event.metadata_json, dict) else {}
+        created_at = q_event.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        age_seconds = (now - created_at).total_seconds()
+
+        # Explicit expiration policy: do not silently discard undelivered alerts
+        if age_seconds > expiration_seconds:
+            logger.warning(
+                "Queued alert %s for device %s expired after %d hours without complete delivery.",
+                q_event.id,
+                q_event.device_id,
+                int(expiration_seconds / 3600),
+            )
+            for channel in channels:
+                if (q_event.id, channel.id) not in successful_deliveries:
+                    db.add(
+                        NotificationDelivery(
+                            event_id=q_event.id,
+                            channel_id=channel.id,
+                            success=False,
+                            status_code=None,
+                            response=None,
+                            error=f"Alert expired: pending delivery exceeded {int(expiration_seconds / 3600)} hours",
+                            created_at=now,
+                        )
+                    )
+            db.add(
+                Event(
+                    device_id=q_event.device_id,
+                    event_type="alert_failed",
+                    severity="error",
+                    message=f"Alert expired after {int(expiration_seconds / 3600)} hours without complete delivery",
+                    metadata_json={
+                        "event_type": meta.get("event_type"),
+                        "source_event_id": meta.get("source_event_id"),
+                        "queued_event_id": q_event.id,
+                        "reason": "expired",
+                    },
+                    created_at=now,
+                )
+            )
+            meta["resolved"] = True
+            meta["expired"] = True
+            q_event.metadata_json = meta
+            db.commit()
+            continue
+
         needed_channels = [
             ch
             for ch in channels
@@ -241,16 +329,20 @@ def _deliver_pending_alerts(
         ]
 
         if not needed_channels:
+            meta["resolved"] = True
+            q_event.metadata_json = meta
+            db.commit()
             continue
 
-        meta = q_event.metadata_json if isinstance(q_event.metadata_json, dict) else {}
         msg = q_event.message or ""
 
         for channel in needed_channels:
-            if deliveries_attempted >= batch_limit or time.monotonic() >= deadline:
+            remaining_budget = deadline - time.monotonic()
+            if deliveries_attempted >= batch_limit or remaining_budget <= 0:
                 logger.warning(
-                    "Notification delivery budget reached (%d attempts); deferring remaining alerts to next scan.",
+                    "Notification delivery budget reached (%d attempts, %.2fs remaining); deferring remaining alerts.",
                     deliveries_attempted,
+                    max(0.0, remaining_budget),
                 )
                 return deliveries_attempted
 
@@ -334,6 +426,17 @@ def _deliver_pending_alerts(
                     },
                 )
             )
+
+        # Check if all channels for this event are now resolved (succeeded or exhausted)
+        remaining_needed = [
+            ch
+            for ch in channels
+            if (q_event.id, ch.id) not in successful_deliveries
+            and attempt_counts.get((q_event.id, ch.id), 0) < MAX_CHANNEL_ATTEMPTS
+        ]
+        if not remaining_needed:
+            meta["resolved"] = True
+            q_event.metadata_json = meta
         db.commit()
 
     return deliveries_attempted
@@ -345,12 +448,18 @@ def _deliver_queued_alerts(
     *,
     batch_limit: int = DEFAULT_ALERT_BATCH_LIMIT,
     budget_seconds: float = DEFAULT_ALERT_BUDGET_SECONDS,
+    expiration_seconds: float = DEFAULT_ALERT_EXPIRATION_SECONDS,
 ) -> None:
     """Queues new intents if provided, and delivers pending alerts within budget."""
     if intents:
         _queue_alert_intents(db, intents)
         db.commit()
-    _deliver_pending_alerts(db, batch_limit=batch_limit, budget_seconds=budget_seconds)
+    _deliver_pending_alerts(
+        db,
+        batch_limit=batch_limit,
+        budget_seconds=budget_seconds,
+        expiration_seconds=expiration_seconds,
+    )
 
 
 def run_scan(db: Session, source: str = "scheduled") -> dict:

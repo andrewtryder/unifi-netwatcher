@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Device, Event, Setting
+from app.models import Device, Event, NotificationDelivery, Setting
 
 logger = logging.getLogger(__name__)
 
@@ -161,6 +161,8 @@ def batch_devices_in_cooldown(
 
     Reconnection alerts are tracked independently of disconnections so that sending
     a disconnection notification does NOT suppress an upcoming reconnection.
+    Deduplication and cooldown are based on durable delivery records, active queued alerts,
+    and summary events.
     """
     if not pairs or cooldown_seconds <= 0:
         return set()
@@ -168,8 +170,9 @@ def batch_devices_in_cooldown(
     cutoff = now - timedelta(seconds=cooldown_seconds)
     device_ids = list({p[0] for p in pairs})
 
+    # 1. Check summary events (alert_sent)
     events = (
-        db.query(Event)
+        db.query(Event.device_id, Event.metadata_json)
         .filter(
             Event.device_id.in_(device_ids),
             Event.event_type == "alert_sent",
@@ -178,12 +181,35 @@ def batch_devices_in_cooldown(
         .all()
     )
 
+    # 2. Check durable successful deliveries (NotificationDelivery.success == True)
+    deliv_events = (
+        db.query(Event.device_id, Event.metadata_json)
+        .join(NotificationDelivery, NotificationDelivery.event_id == Event.id)
+        .filter(
+            Event.device_id.in_(device_ids),
+            NotificationDelivery.success.is_(True),
+            NotificationDelivery.created_at >= cutoff,
+        )
+        .all()
+    )
+
+    # 3. Check active queued events (alert_queued)
+    queued_events = (
+        db.query(Event.device_id, Event.metadata_json)
+        .filter(
+            Event.device_id.in_(device_ids),
+            Event.event_type == "alert_queued",
+            Event.created_at >= cutoff,
+        )
+        .all()
+    )
+
     in_cooldown: set[tuple[int, str]] = set()
-    for ev in events:
-        dev_id = ev.device_id
+    for row in events + deliv_events + queued_events:
+        dev_id = row[0]
         if dev_id is None:
             continue
-        meta = ev.metadata_json
+        meta = row[1]
         alert_event_type = (
             meta.get("event_type", "discovered") if isinstance(meta, dict) else "discovered"
         )

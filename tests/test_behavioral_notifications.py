@@ -20,6 +20,7 @@ from app.scanner import (
     AlertIntent,
     _deliver_pending_alerts,
     _deliver_queued_alerts,
+    _devices_in_alert_cooldown,
     run_scan,
 )
 from app.security.service import invalidate_security_cache
@@ -1101,4 +1102,455 @@ def test_durable_recovery_after_process_restart(monkeypatch):
     assert deliv is not None
     assert deliv.success is True
     assert deliv.channel_id == channel.id
+    db.close()
+
+
+def test_starvation_prevention_over_50_completed_events(monkeypatch):
+    """Old completed alert_queued records cannot starve newer pending work even when >50 exist."""
+    db = TestingSessionLocal()
+    now = utcnow()
+    sent_calls: list[str] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            sent_calls.append(msg)
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    channel = NotificationChannel(
+        name="starvation-test-channel",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/starvation"},
+    )
+    db.add(channel)
+    db.flush()
+
+    # Create 55 completed alert_queued events (older timestamps)
+    # Each has a successful NotificationDelivery for the channel and resolved=True
+    for i in range(55):
+        dev = Device(mac=f"00:22:33:44:55:{i:02x}", hostname=f"completed-dev-{i}")
+        db.add(dev)
+        db.flush()
+        q_event = Event(
+            device_id=dev.id,
+            event_type="alert_queued",
+            message=f"Completed alert {i}",
+            metadata_json={
+                "source_event_id": 200 + i,
+                "event_type": "device_disconnected",
+                "resolved": True,
+            },
+            created_at=now - timedelta(hours=10) + timedelta(seconds=i),
+        )
+        db.add(q_event)
+        db.flush()
+        db.add(
+            NotificationDelivery(
+                event_id=q_event.id,
+                channel_id=channel.id,
+                success=True,
+                status_code=200,
+                response="ok",
+                created_at=q_event.created_at,
+            )
+        )
+
+    # Create 5 newer pending alert_queued events
+    pending_ids = []
+    for j in range(5):
+        dev = Device(mac=f"00:77:88:99:aa:{j:02x}", hostname=f"pending-dev-{j}")
+        db.add(dev)
+        db.flush()
+        q_event = Event(
+            device_id=dev.id,
+            event_type="alert_queued",
+            message=f"Pending alert {j}",
+            metadata_json={
+                "source_event_id": 500 + j,
+                "event_type": "device_disconnected",
+                "resolved": False,
+            },
+            created_at=now - timedelta(minutes=5) + timedelta(seconds=j),
+        )
+        db.add(q_event)
+        db.flush()
+        pending_ids.append(q_event.id)
+    db.commit()
+
+    # If completed events starved the query, the .limit(50) on queued_events would return
+    # only the first 50 completed records, resulting in 0 attempted deliveries.
+    # With pending-work-aware query, all 5 pending events are fetched and delivered.
+    attempted = _deliver_pending_alerts(db, batch_limit=10)
+    assert attempted == 5
+    assert len(sent_calls) == 5
+    assert sent_calls == [f"Pending alert {j}" for j in range(5)]
+
+    # Verify all 5 pending events are now marked resolved
+    delivered_events = db.query(Event).filter(Event.id.in_(pending_ids)).all()
+    for ev in delivered_events:
+        assert ev.metadata_json.get("resolved") is True
+
+    db.close()
+
+
+def test_pending_delivery_recovery_after_24_hours(monkeypatch):
+    """Pending alerts between 24h and 48h old are not discarded and are recovered successfully."""
+    db = TestingSessionLocal()
+    now = utcnow()
+    sent_calls: list[str] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            sent_calls.append(msg)
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    channel = NotificationChannel(
+        name="recovery-channel",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/recovery"},
+    )
+    dev = Device(mac="11:22:33:44:55:66", hostname="recovering-dev")
+    db.add_all([channel, dev])
+    db.flush()
+
+    # Event queued 30 hours ago (beyond old 24h cutoff, but within 48h expiration)
+    q_event = Event(
+        device_id=dev.id,
+        event_type="alert_queued",
+        message="Alert from 30 hours ago",
+        metadata_json={"source_event_id": 888, "event_type": "device_disconnected"},
+        created_at=now - timedelta(hours=30),
+    )
+    db.add(q_event)
+    db.commit()
+
+    # Deliver pending alerts: should recover and deliver
+    attempted = _deliver_pending_alerts(db)
+    assert attempted == 1
+    assert len(sent_calls) == 1
+    assert sent_calls[0] == "Alert from 30 hours ago"
+
+    # Verify delivery record exists and succeeded
+    delivery = db.query(NotificationDelivery).filter_by(event_id=q_event.id).first()
+    assert delivery is not None
+    assert delivery.success is True
+    assert delivery.channel_id == channel.id
+
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is True
+    assert q_event.metadata_json.get("expired") is not True
+    db.close()
+
+
+def test_explicit_expiration_policy_after_48_hours(monkeypatch):
+    """Alerts exceeding expiration window (>48h) are not silently dropped; terminal failure is recorded."""
+    db = TestingSessionLocal()
+    now = utcnow()
+    sent_calls: list[str] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            sent_calls.append(msg)
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    channel = NotificationChannel(
+        name="expiration-channel",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/expiration"},
+    )
+    dev = Device(mac="11:22:33:44:55:77", hostname="expired-dev")
+    db.add_all([channel, dev])
+    db.flush()
+
+    # Event queued 50 hours ago (exceeding 48h expiration)
+    q_event = Event(
+        device_id=dev.id,
+        event_type="alert_queued",
+        message="Alert from 50 hours ago",
+        metadata_json={"source_event_id": 889, "event_type": "device_disconnected"},
+        created_at=now - timedelta(hours=50),
+    )
+    db.add(q_event)
+    db.commit()
+
+    attempted = _deliver_pending_alerts(db)
+    # No actual provider attempts because it expired
+    assert attempted == 0
+    assert len(sent_calls) == 0
+
+    # Explicit failure delivery written to DB
+    delivery = db.query(NotificationDelivery).filter_by(event_id=q_event.id).first()
+    assert delivery is not None
+    assert delivery.success is False
+    assert "Alert expired" in (delivery.error or "")
+
+    # Audit event recorded
+    failed_event = (
+        db.query(Event)
+        .filter(Event.device_id == dev.id, Event.event_type == "alert_failed")
+        .first()
+    )
+    assert failed_event is not None
+    assert failed_event.severity == "error"
+    assert failed_event.metadata_json.get("reason") == "expired"
+
+    # Queued event marked resolved and expired
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is True
+    assert q_event.metadata_json.get("expired") is True
+    db.close()
+
+
+def test_batch_ending_midway_through_multichannel_event(monkeypatch):
+    """A batch limit stopping midway through a multi-channel event commits channel 1 and defers channel 2."""
+    db = TestingSessionLocal()
+    now = utcnow()
+    calls: list[tuple[str, str]] = []
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            ch_name = cfg.get("name", "unknown")
+            calls.append((ch_name, msg))
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    ch1 = NotificationChannel(
+        name="channel-1",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/1", "name": "channel-1"},
+    )
+    ch2 = NotificationChannel(
+        name="channel-2",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/2", "name": "channel-2"},
+    )
+    dev = Device(mac="22:33:44:55:66:77", hostname="midway-dev")
+    db.add_all([ch1, ch2, dev])
+    db.flush()
+
+    q_event = Event(
+        device_id=dev.id,
+        event_type="alert_queued",
+        message="Midway multi-channel alert",
+        metadata_json={"source_event_id": 901, "event_type": "device_disconnected"},
+        created_at=now,
+    )
+    db.add(q_event)
+    db.commit()
+
+    # Pass 1: batch_limit = 1
+    # Only 1 delivery attempt should run
+    attempted_1 = _deliver_pending_alerts(db, batch_limit=1)
+    assert attempted_1 == 1
+    assert len(calls) == 1
+    assert calls[0][0] == "channel-1"
+
+    # Verify channel 1 delivery is durably committed in DB
+    delivs_1 = db.query(NotificationDelivery).filter_by(event_id=q_event.id).all()
+    assert len(delivs_1) == 1
+    assert delivs_1[0].channel_id == ch1.id
+    assert delivs_1[0].success is True
+
+    # q_event should NOT be resolved yet because channel 2 is still pending
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is not True
+
+    # Pass 2: batch_limit = 1
+    # Channel 2 should run now, and channel 1 should NOT be re-called
+    attempted_2 = _deliver_pending_alerts(db, batch_limit=1)
+    assert attempted_2 == 1
+    assert len(calls) == 2
+    assert calls[1][0] == "channel-2"
+
+    delivs_2 = db.query(NotificationDelivery).filter_by(event_id=q_event.id).all()
+    assert len(delivs_2) == 2
+    ch_ids = {d.channel_id for d in delivs_2}
+    assert ch_ids == {ch1.id, ch2.id}
+
+    # Now q_event should be resolved
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is True
+
+    db.close()
+
+
+def test_cooldown_and_deduplication_after_partial_batch(monkeypatch):
+    """Cooldown and deduplication are preserved even after a partial batch where alert_sent is not complete."""
+    db = TestingSessionLocal()
+    now = utcnow()
+
+    class MockProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockProvider()})
+
+    ch1 = NotificationChannel(
+        name="cooldown-ch1",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/c1"},
+    )
+    ch2 = NotificationChannel(
+        name="cooldown-ch2",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/c2"},
+    )
+    dev = Device(mac="33:44:55:66:77:88", hostname="cooldown-dev")
+    db.add_all([ch1, ch2, dev])
+    db.flush()
+
+    q_event = Event(
+        device_id=dev.id,
+        event_type="alert_queued",
+        message="Cooldown test alert",
+        metadata_json={"source_event_id": 902, "event_type": "device_disconnected"},
+        created_at=now,
+    )
+    db.add(q_event)
+    db.commit()
+
+    # Run pass with batch_limit=1 -> channel 1 succeeds, channel 2 deferred
+    _deliver_pending_alerts(db, batch_limit=1)
+
+    # Cooldown checks must immediately recognize the device as in cooldown:
+    # 1. Behavioral cooldown check via is_in_behavioral_cooldown
+    assert is_in_behavioral_cooldown(db, dev.id, "device_disconnected", 3600, now) is True
+
+    # 2. Behavioral batch check via batch_devices_in_cooldown
+    cooldown_pairs = batch_devices_in_cooldown(db, [(dev.id, "device_disconnected")], 3600, now)
+    assert (dev.id, "device_disconnected") in cooldown_pairs
+
+    # A different event type (e.g. device_reconnected) is NOT suppressed
+    assert is_in_behavioral_cooldown(db, dev.id, "device_reconnected", 3600, now) is False
+    assert (dev.id, "device_reconnected") not in batch_devices_in_cooldown(
+        db, [(dev.id, "device_reconnected")], 3600, now
+    )
+
+    # 3. Discovery cooldown check via scanner._devices_in_alert_cooldown for discovery events
+    dev_disc = Device(mac="33:44:55:66:77:99", hostname="disc-dev")
+    db.add(dev_disc)
+    db.flush()
+    q_disc = Event(
+        device_id=dev_disc.id,
+        event_type="alert_queued",
+        message="Discovery alert",
+        metadata_json={"event_type": "discovered"},
+        created_at=now,
+    )
+    db.add(q_disc)
+    db.commit()
+
+    _deliver_pending_alerts(db, batch_limit=1)
+    disc_cooldown = _devices_in_alert_cooldown(db, [dev_disc.id], now)
+    assert dev_disc.id in disc_cooldown
+
+    db.close()
+
+
+def test_provider_call_exceeds_remaining_delivery_budget(monkeypatch):
+    """When a delivery provider call consumes the time budget, subsequent deliveries are deferred."""
+    db = TestingSessionLocal()
+    now = utcnow()
+    calls: list[str] = []
+
+    # Mock time.monotonic to simulate elapsed wall-clock budget
+    current_time = [100.0]
+
+    def mock_monotonic():
+        return current_time[0]
+
+    monkeypatch.setattr("time.monotonic", mock_monotonic)
+
+    class MockSlowProvider:
+        def validate_config(self, cfg):
+            return True
+
+        def send(self, msg, cfg):
+            calls.append(cfg.get("url", ""))
+            # Simulate request taking 0.35s
+            current_time[0] += 0.35
+            return True, 200, "ok", ""
+
+    monkeypatch.setattr("app.scanner.PROVIDERS", {"webhook": MockSlowProvider()})
+
+    ch1 = NotificationChannel(
+        name="budget-ch1",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/b1"},
+    )
+    ch2 = NotificationChannel(
+        name="budget-ch2",
+        type="webhook",
+        enabled=True,
+        config_json={"url": "https://hooks.example.com/b2"},
+    )
+    dev = Device(mac="44:55:66:77:88:99", hostname="budget-dev")
+    db.add_all([ch1, ch2, dev])
+    db.flush()
+
+    q_event = Event(
+        device_id=dev.id,
+        event_type="alert_queued",
+        message="Budget test alert",
+        metadata_json={"source_event_id": 903, "event_type": "device_disconnected"},
+        created_at=now,
+    )
+    db.add(q_event)
+    db.commit()
+
+    # budget_seconds = 0.3s.
+    # Delivery 1 starts at t=100.0, finishes at t=100.35.
+    # Before Delivery 2, remaining_budget = (100.0 + 0.3) - 100.35 = -0.05 <= 0.
+    # Delivery 2 must be deferred!
+    attempted = _deliver_pending_alerts(db, budget_seconds=0.3)
+    assert attempted == 1
+    assert len(calls) == 1
+    assert calls[0] == "https://hooks.example.com/b1"
+
+    # Only 1 delivery was recorded
+    delivs = db.query(NotificationDelivery).filter_by(event_id=q_event.id).all()
+    assert len(delivs) == 1
+    assert delivs[0].channel_id == ch1.id
+
+    # The event remains unresolved for subsequent scans
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is not True
+
+    # Advance time / reset budget for next scan: delivery 2 completes
+    attempted_2 = _deliver_pending_alerts(db, budget_seconds=0.5)
+    assert attempted_2 == 1
+    assert len(calls) == 2
+    assert calls[1] == "https://hooks.example.com/b2"
+
+    db.refresh(q_event)
+    assert q_event.metadata_json.get("resolved") is True
     db.close()
