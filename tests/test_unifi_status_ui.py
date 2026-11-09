@@ -51,6 +51,7 @@ AUTH = basic_auth_header()
 @pytest.fixture(autouse=True)
 def setup_db(monkeypatch):
     close_unifi_adapter()
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
     monkeypatch.setattr("app.db.SessionLocal", TestingSessionLocal)
     monkeypatch.setattr("app.main.SessionLocal", TestingSessionLocal)
     monkeypatch.setattr("app.security.middleware.SessionLocal", TestingSessionLocal)
