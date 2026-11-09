@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from unittest.mock import MagicMock
 
 import httpx
@@ -10,7 +11,6 @@ from app.unifi import (
     UniFiAdapter,
     UniFiAuthError,
     UniFiCapabilities,
-    UnifiClient,
     UniFiClientDevice,
     UniFiConnectionError,
     UniFiPermissionError,
@@ -44,7 +44,7 @@ def test_as_int_and_as_bool_helpers():
     assert as_bool("unknown") is None
 
 
-def test_unifi_client_device_attributes_and_dict_access():
+def test_unifi_client_device_attributes_and_mapping_protocol():
     device = UniFiClientDevice(
         mac="aa:bb:cc:dd:ee:ff",
         ip="192.168.1.10",
@@ -53,12 +53,25 @@ def test_unifi_client_device_attributes_and_dict_access():
         tx_rate_bps=300000,
         raw_data={"custom_field": "custom_val"},
     )
+    # Attribute access
     assert device.mac == "aa:bb:cc:dd:ee:ff"
     assert device.ip == "192.168.1.10"
     assert device.hostname == "my-laptop"
     assert device.rssi == -55
 
-    # Dict-like compatibility
+    # Conforms to collections.abc.Mapping
+    assert isinstance(device, Mapping)
+    assert len(device) > 0
+    assert "mac" in list(device)
+    assert "custom_field" in list(device)
+
+    # Dictionary conversion
+    as_dict = dict(device)
+    assert isinstance(as_dict, dict)
+    assert as_dict["mac"] == "aa:bb:cc:dd:ee:ff"
+    assert as_dict["custom_field"] == "custom_val"
+
+    # Subscripting and .get()
     assert device["mac"] == "aa:bb:cc:dd:ee:ff"
     assert device.get("ip") == "192.168.1.10"
     assert device.get("signal") == -55
@@ -67,6 +80,10 @@ def test_unifi_client_device_attributes_and_dict_access():
     assert device.get("nonexistent", "fallback") == "fallback"
     assert "mac" in device
     assert "custom_field" in device
+    assert "signal" in device
+
+    with pytest.raises(KeyError):
+        _ = device["nonexistent_key"]
 
 
 def test_unifi_client_device_from_legacy_dict():
@@ -103,13 +120,25 @@ def test_unifi_client_device_from_legacy_dict():
     assert dev.raw_data == raw
 
 
-def test_unifi_capabilities():
+def test_unifi_capabilities_defaults_and_explicit_legacy():
+    # Base defaults should be safely False
     caps = UniFiCapabilities()
-    assert caps.can_block is True
-    assert caps.can_unblock is True
-    assert caps.has_wifi_telemetry is True
-    assert caps.has_switch_port is True
+    assert caps.can_block is False
+    assert caps.can_unblock is False
+    assert caps.has_wifi_telemetry is False
+    assert caps.has_switch_port is False
     assert caps.supports_pagination is False
+
+    # Base UniFiAdapter has safe defaults
+    assert UniFiAdapter.capabilities.can_block is False
+
+    # Legacy adapter explicitly declares its supported capabilities
+    legacy_caps = LegacyUniFiAdapter.capabilities
+    assert legacy_caps.can_block is True
+    assert legacy_caps.can_unblock is True
+    assert legacy_caps.has_wifi_telemetry is True
+    assert legacy_caps.has_switch_port is True
+    assert legacy_caps.supports_pagination is False
 
 
 def test_legacy_adapter_mock_mode(monkeypatch):
@@ -142,7 +171,7 @@ def test_legacy_adapter_login_flow(monkeypatch):
     assert adapter.login() is True
     assert adapter._logged_in is True
 
-    # 401 Invalid credentials
+    # 401 Invalid credentials (preserves boolean return)
     mock_http.post.return_value = MagicMock(status_code=401)
     assert adapter.login() is False
     assert adapter._logged_in is False
@@ -154,6 +183,92 @@ def test_legacy_adapter_login_flow(monkeypatch):
     # Connection error
     mock_http.post.side_effect = httpx.ConnectError("Network is unreachable")
     assert adapter.login() is False
+
+
+def test_legacy_adapter_authenticate_typed_errors(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    mock_http = MagicMock()
+    adapter = LegacyUniFiAdapter(shared_http=mock_http)
+
+    # 401 invalid credentials
+    mock_http.post.side_effect = None
+    mock_http.post.return_value = MagicMock(status_code=401)
+    with pytest.raises(UniFiAuthError):
+        adapter._authenticate()
+
+    # 403 permission denied
+    mock_http.post.return_value = MagicMock(status_code=403)
+    with pytest.raises(UniFiPermissionError):
+        adapter._authenticate()
+
+    # Connection failure
+    mock_http.post.side_effect = httpx.ConnectError("Connection refused")
+    with pytest.raises(UniFiConnectionError):
+        adapter._authenticate()
+
+    # Timeout
+    mock_http.post.side_effect = httpx.ConnectTimeout("Connect timed out")
+    with pytest.raises(UniFiTimeoutError):
+        adapter._authenticate()
+
+
+def test_legacy_adapter_get_clients_initial_login_errors(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    mock_http = MagicMock()
+    adapter = LegacyUniFiAdapter(shared_http=mock_http)
+    adapter._logged_in = False
+
+    # Connection error on login raises UniFiConnectionError, NOT UniFiAuthError
+    mock_http.post.side_effect = httpx.ConnectError("Controller unreachable")
+    with pytest.raises(UniFiConnectionError) as excinfo:
+        adapter.get_clients()
+    assert "Cannot reach UniFi controller" in str(excinfo.value)
+
+    # Timeout on login raises UniFiTimeoutError, NOT UniFiAuthError
+    mock_http.post.side_effect = httpx.ConnectTimeout("Login timed out")
+    with pytest.raises(UniFiTimeoutError) as excinfo:
+        adapter.get_clients()
+    assert "timed out" in str(excinfo.value)
+
+    # 403 on login raises UniFiPermissionError
+    mock_http.post.side_effect = None
+    mock_http.post.return_value = MagicMock(status_code=403)
+    with pytest.raises(UniFiPermissionError):
+        adapter.get_clients()
+
+    # 401 on login raises UniFiAuthError
+    mock_http.post.return_value = MagicMock(status_code=401)
+    with pytest.raises(UniFiAuthError):
+        adapter.get_clients()
+
+
+def test_legacy_adapter_get_clients_reauth_errors(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    mock_http = MagicMock()
+    adapter = LegacyUniFiAdapter(shared_http=mock_http)
+    adapter._logged_in = True
+
+    # 401 on GET, re-authentication gets connection error
+    mock_http.get.return_value = MagicMock(status_code=401)
+    mock_http.post.side_effect = httpx.ConnectError("Controller dropped")
+    with pytest.raises(UniFiConnectionError):
+        adapter.get_clients()
+
+    # 401 on GET, re-authentication times out
+    mock_http.post.side_effect = httpx.ReadTimeout("Timeout on re-login")
+    with pytest.raises(UniFiTimeoutError):
+        adapter.get_clients()
+
+    # 401 on GET, re-authentication gets 403
+    mock_http.post.side_effect = None
+    mock_http.post.return_value = MagicMock(status_code=403)
+    with pytest.raises(UniFiPermissionError):
+        adapter.get_clients()
+
+    # 401 on GET, re-authentication gets 401
+    mock_http.post.return_value = MagicMock(status_code=401)
+    with pytest.raises(UniFiAuthError):
+        adapter.get_clients()
 
 
 def test_legacy_adapter_get_clients_empty_site(monkeypatch):
@@ -170,21 +285,68 @@ def test_legacy_adapter_get_clients_empty_site(monkeypatch):
     assert clients == []
 
 
-def test_legacy_adapter_get_clients_errors(monkeypatch):
+def test_legacy_adapter_get_clients_response_validation(monkeypatch):
     monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
     mock_http = MagicMock()
     adapter = LegacyUniFiAdapter(shared_http=mock_http)
     adapter._logged_in = True
 
-    # 401 on GET, re-login also fails
-    mock_http.get.return_value = MagicMock(status_code=401)
-    mock_http.post.return_value = MagicMock(status_code=401)
-    with pytest.raises(UniFiAuthError):
+    # Controller returns error rc in meta
+    mock_http.get.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {"meta": {"rc": "error", "msg": "api.err.InvalidSite"}, "data": []},
+    )
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "api.err.InvalidSite" in str(excinfo.value)
+
+    # Missing "data" field (e.g. empty JSON dict {})
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: {})
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "missing required 'data' field" in str(excinfo.value)
+
+    # "data" is not a list
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: {"data": "not a list"})
+    with pytest.raises(UniFiResponseError):
         adapter.get_clients()
 
-    # Reset login state for subsequent tests
+    # Malformed element in "data" (not a dict)
+    mock_http.get.return_value = MagicMock(
+        status_code=200, json=lambda: {"data": ["invalid_string"]}
+    )
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "expected dict" in str(excinfo.value)
+
+    # Malformed element in "data" (missing MAC)
+    mock_http.get.return_value = MagicMock(
+        status_code=200, json=lambda: {"data": [{"hostname": "no_mac_device"}]}
+    )
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "missing or invalid 'mac'" in str(excinfo.value)
+
+    # Malformed element with empty string MAC
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: {"data": [{"mac": "   "}]})
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "missing or invalid 'mac'" in str(excinfo.value)
+
+    # Valid device in "data"
+    mock_http.get.return_value = MagicMock(
+        status_code=200, json=lambda: {"data": [{"mac": "aa:bb:cc:11:22:33", "ip": "10.0.0.1"}]}
+    )
+    clients = adapter.get_clients()
+    assert len(clients) == 1
+    assert clients[0].mac == "aa:bb:cc:11:22:33"
+
+
+def test_legacy_adapter_get_clients_http_errors(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    mock_http = MagicMock()
+    adapter = LegacyUniFiAdapter(shared_http=mock_http)
     adapter._logged_in = True
-    mock_http.post.return_value = MagicMock(status_code=200)
 
     # 403 on GET
     mock_http.get.return_value = MagicMock(status_code=403)
@@ -201,27 +363,24 @@ def test_legacy_adapter_get_clients_errors(monkeypatch):
     with pytest.raises(UniFiTimeoutError):
         adapter.get_clients()
 
-    # Malformed response
-    mock_http.get.side_effect = None
-    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: "not a dict")
-    with pytest.raises(UniFiResponseError):
-        adapter.get_clients()
-
-    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: {"data": "not a list"})
-    with pytest.raises(UniFiResponseError):
-        adapter.get_clients()
-
 
 def test_legacy_adapter_test_connection(monkeypatch):
     monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
     mock_http = MagicMock()
     adapter = LegacyUniFiAdapter(shared_http=mock_http)
 
-    # Login failure
+    # Login failure: connection error propagates correctly
+    mock_http.post.side_effect = httpx.ConnectError("Network is down")
+    success, msg = adapter.test_connection()
+    assert success is False
+    assert "Cannot reach UniFi controller" in msg
+
+    # Login failure: 401 invalid credentials
+    mock_http.post.side_effect = None
     mock_http.post.return_value = MagicMock(status_code=401)
     success, msg = adapter.test_connection()
     assert success is False
-    assert "Authentication failed" in msg
+    assert "Invalid credentials" in msg
 
     # Login ok and get_clients ok
     mock_http.post.return_value = MagicMock(status_code=200)
@@ -231,15 +390,14 @@ def test_legacy_adapter_test_connection(monkeypatch):
     assert "Successfully connected" in msg
 
 
-def test_backward_compatible_unifi_client():
+def test_backward_compatible_unifi_client_and_adapter_singleton():
     client = get_unifi_client()
-    assert isinstance(client, UnifiClient)
+    adapter = get_unifi_adapter()
+
+    # Unified singleton instance
+    assert client is adapter
     assert isinstance(client, LegacyUniFiAdapter)
     assert isinstance(client, UniFiAdapter)
-
-    # Adapter factory
-    adapter = get_unifi_adapter()
-    assert isinstance(adapter, LegacyUniFiAdapter)
 
     close_unifi_client()
     close_unifi_adapter()

@@ -65,40 +65,67 @@ class LegacyUniFiAdapter(UniFiAdapter):
             logger.error(f"Failed to load mock data: {e}")
             return []
 
-    def login(self) -> bool:
-        """Authenticate against the UniFi controller using session cookies."""
+    def _authenticate(self) -> None:
+        """Authenticate against the UniFi controller, raising typed UniFiError on failure."""
         self._load_settings()
         if self.mock_mode:
             logger.info("Legacy UniFi Adapter running in MOCK MODE. Simulating login.")
             self._logged_in = True
-            return True
+            return
 
         login_url = f"{self.base_url}/api/auth/login"
         payload = {"username": self.username, "password": self.password}
         try:
             r = self.client.post(login_url, json=payload)
             if r.status_code == 401:
-                logger.error("Failed to login to UniFi Controller: Invalid credentials (401)")
                 self._logged_in = False
-                return False
+                raise UniFiAuthError(
+                    "Failed to login to UniFi Controller: Invalid credentials (401)"
+                )
             if r.status_code == 403:
-                logger.error("Failed to login to UniFi Controller: Permission denied (403)")
                 self._logged_in = False
-                return False
+                raise UniFiPermissionError(
+                    "Failed to login to UniFi Controller: Permission denied (403)"
+                )
             r.raise_for_status()
             self._logged_in = True
-            return True
-        except httpx.ConnectError as e:
-            logger.error(f"Failed to connect to UniFi Controller: {e}")
+        except UniFiAuthError, UniFiPermissionError:
+            raise
+        except (httpx.ConnectError, httpx.NetworkError) as e:
             self._logged_in = False
-            return False
+            raise UniFiConnectionError(
+                f"Cannot reach UniFi controller at {self.base_url}: {e}"
+            ) from e
         except httpx.TimeoutException as e:
-            logger.error(f"Timed out connecting to UniFi Controller: {e}")
             self._logged_in = False
-            return False
+            raise UniFiTimeoutError(
+                f"UniFi controller login timed out after {self.timeout}s: {e}"
+            ) from e
+        except httpx.HTTPStatusError as e:
+            self._logged_in = False
+            if e.response.status_code == 401:
+                raise UniFiAuthError(
+                    f"UniFi authorization error (HTTP {e.response.status_code})"
+                ) from e
+            if e.response.status_code == 403:
+                raise UniFiPermissionError(
+                    f"UniFi access forbidden (HTTP {e.response.status_code})"
+                ) from e
+            raise UniFiResponseError(f"UniFi login HTTP error: {e.response.status_code}") from e
         except Exception as e:
-            logger.error(f"Failed to login to UniFi Controller: {e}")
             self._logged_in = False
+            raise UniFiError(f"Unexpected error authenticating with UniFi controller: {e}") from e
+
+    def login(self) -> bool:
+        """Authenticate against the UniFi controller using session cookies.
+
+        Preserves boolean return for backward compatibility with callers.
+        """
+        try:
+            self._authenticate()
+            return True
+        except UniFiError as e:
+            logger.error(f"UniFi login failed: {e}")
             return False
 
     def get_clients(self) -> list[UniFiClientDevice]:
@@ -109,21 +136,18 @@ class LegacyUniFiAdapter(UniFiAdapter):
             raw_clients = self._get_mock_data()
             return [UniFiClientDevice.from_legacy_dict(c) for c in raw_clients]
 
-        if not self._logged_in and not self.login():
-            raise UniFiAuthError(
-                "Failed to authenticate with UniFi controller. Check username and password."
-            )
+        if not self._logged_in:
+            self._authenticate()
 
         url = f"{self.base_url}/proxy/network/api/s/{self.site}/stat/sta"
         try:
             r = self.client.get(url)
             if r.status_code == 401:
-                if self.login():
-                    r = self.client.get(url)
-                else:
-                    raise UniFiAuthError("UniFi session expired and re-login failed.")
+                logger.info("UniFi session expired, re-authenticating...")
+                self._authenticate()
+                r = self.client.get(url)
             if r.status_code == 401:
-                raise UniFiAuthError("UniFi unauthorized (HTTP 401).")
+                raise UniFiAuthError("UniFi unauthorized (HTTP 401) after re-authentication.")
             if r.status_code == 403:
                 raise UniFiPermissionError("UniFi permission denied (HTTP 403).")
             r.raise_for_status()
@@ -134,13 +158,38 @@ class LegacyUniFiAdapter(UniFiAdapter):
                 raise UniFiResponseError(f"Malformed JSON from UniFi controller: {exc}") from exc
 
             if not isinstance(payload, dict):
-                raise UniFiResponseError("Unexpected response format from UniFi controller")
+                raise UniFiResponseError(
+                    "Unexpected response format from UniFi controller (expected JSON object)"
+                )
 
-            data = payload.get("data", [])
+            meta = payload.get("meta")
+            if isinstance(meta, dict) and meta.get("rc") == "error":
+                msg = meta.get("msg", "Unknown controller error")
+                raise UniFiResponseError(f"UniFi controller returned error: {msg}")
+
+            if "data" not in payload:
+                raise UniFiResponseError("UniFi response missing required 'data' field")
+
+            data = payload["data"]
             if not isinstance(data, list):
-                raise UniFiResponseError("UniFi response 'data' field is not a list")
+                raise UniFiResponseError(
+                    f"UniFi response 'data' field is not a list (got {type(data).__name__})"
+                )
 
-            return [UniFiClientDevice.from_legacy_dict(c) for c in data if isinstance(c, dict)]
+            clients: list[UniFiClientDevice] = []
+            for idx, item in enumerate(data):
+                if not isinstance(item, dict):
+                    raise UniFiResponseError(
+                        f"Malformed client record at index {idx} in UniFi response: expected dict, got {type(item).__name__}"
+                    )
+                mac = item.get("mac")
+                if not mac or not isinstance(mac, str) or not mac.strip():
+                    raise UniFiResponseError(
+                        f"Malformed client record at index {idx} in UniFi response: missing or invalid 'mac' identifier"
+                    )
+                clients.append(UniFiClientDevice.from_legacy_dict(item))
+
+            return clients
 
         except UniFiError, UniFiAuthError, UniFiPermissionError, UniFiResponseError:
             raise
@@ -199,8 +248,8 @@ class LegacyUniFiAdapter(UniFiAdapter):
         if self.mock_mode:
             return True, "Mock mode active (connection simulated)"
         try:
-            if not self.login():
-                return False, "Authentication failed. Check UNIFI_USERNAME and UNIFI_PASSWORD."
+            if not self._logged_in:
+                self._authenticate()
             # Verify client endpoint
             self.get_clients()
             return (

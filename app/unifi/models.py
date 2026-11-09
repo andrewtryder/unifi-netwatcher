@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping
+from dataclasses import dataclass, field, fields
 from typing import Any
 
 
@@ -30,12 +31,12 @@ class UniFiResponseError(UniFiError):
 
 @dataclass(frozen=True)
 class UniFiCapabilities:
-    """Declared capabilities supported by a UniFi adapter."""
+    """Declared capabilities supported by a UniFi adapter. Defaults to False for safety."""
 
-    can_block: bool = True
-    can_unblock: bool = True
-    has_wifi_telemetry: bool = True
-    has_switch_port: bool = True
+    can_block: bool = False
+    can_unblock: bool = False
+    has_wifi_telemetry: bool = False
+    has_switch_port: bool = False
     supports_pagination: bool = False
 
 
@@ -65,8 +66,8 @@ def as_bool(value: Any) -> bool | None:
 
 
 @dataclass
-class UniFiClientDevice:
-    """Normalized client device identity and telemetry across UniFi APIs."""
+class UniFiClientDevice(Mapping[str, Any]):
+    """Normalized client device identity and telemetry conforming to collections.abc.Mapping."""
 
     mac: str
     ip: str | None = None
@@ -125,29 +126,63 @@ class UniFiClientDevice:
             raw_data=data,
         )
 
-    def get(self, key: str, default: Any = None) -> Any:
-        """Dict-like access for backward compatibility with existing consumers."""
-        if hasattr(self, key):
+    def _keys(self) -> set[str]:
+        keys = {f.name for f in fields(self) if f.name != "raw_data"}
+        keys.update(self.raw_data.keys())
+        keys.update({"signal", "tx_rate", "rx_rate", "tx_bytes-r", "rx_bytes-r"})
+        return keys
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._keys())
+
+    def __len__(self) -> int:
+        return len(self._keys())
+
+    def __getitem__(self, key: str) -> Any:
+        if not isinstance(key, str):
+            raise KeyError(key)
+
+        # Legacy aliases
+        if key == "signal":
+            return self.rssi if self.rssi is not None else self.raw_data.get("signal")
+        if key == "tx_rate":
+            return (
+                self.tx_rate_bps if self.tx_rate_bps is not None else self.raw_data.get("tx_rate")
+            )
+        if key == "rx_rate":
+            return (
+                self.rx_rate_bps if self.rx_rate_bps is not None else self.raw_data.get("rx_rate")
+            )
+        if key == "tx_bytes-r":
+            return (
+                self.tx_bytes_r if self.tx_bytes_r is not None else self.raw_data.get("tx_bytes-r")
+            )
+        if key == "rx_bytes-r":
+            return (
+                self.rx_bytes_r if self.rx_bytes_r is not None else self.raw_data.get("rx_bytes-r")
+            )
+
+        # Dataclass fields
+        if hasattr(self, key) and key != "raw_data":
             val = getattr(self, key)
             if val is not None:
                 return val
-        if key == "signal" and self.rssi is not None:
-            return self.rssi
-        if key == "tx_rate" and self.tx_rate_bps is not None:
-            return self.tx_rate_bps
-        if key == "rx_rate" and self.rx_rate_bps is not None:
-            return self.rx_rate_bps
-        if key == "tx_bytes-r" and self.tx_bytes_r is not None:
-            return self.tx_bytes_r
-        if key == "rx_bytes-r" and self.rx_bytes_r is not None:
-            return self.rx_bytes_r
-        return self.raw_data.get(key, default)
 
-    def __getitem__(self, key: str) -> Any:
-        val = self.get(key)
-        if val is None and key not in self.raw_data and not hasattr(self, key):
-            raise KeyError(key)
-        return val
+        # Check raw_data
+        if key in self.raw_data:
+            return self.raw_data[key]
 
-    def __contains__(self, key: str) -> bool:
-        return hasattr(self, key) or key in self.raw_data
+        # Field exists on model but value is None
+        if hasattr(self, key) and key != "raw_data":
+            return None
+
+        raise KeyError(key)
+
+    def __contains__(self, key: object) -> bool:
+        if not isinstance(key, str):
+            return False
+        if key in {"signal", "tx_rate", "rx_rate", "tx_bytes-r", "rx_bytes-r"}:
+            return True
+        if hasattr(self, key) and key != "raw_data":
+            return True
+        return key in self.raw_data

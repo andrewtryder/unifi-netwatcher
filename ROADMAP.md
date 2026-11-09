@@ -187,3 +187,4 @@ Every phase and pull request must strictly adhere to these architectural constra
 | **Controller Outage Cascade** | High | Explicitly distinguish scan failures from zero-client observations; freeze connectivity state during scan errors. |
 | **SQLite Concurrency & Lock Contention** | Medium | Single-process scanning lock (`_scan_lock`); batch DB reads and writes in bounded transactions. |
 | **Webhook Delivery Reliability** | Medium | Maintain periodic polling as the authoritative state reconciler; treat webhooks solely as scan triggers. |
+

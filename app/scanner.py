@@ -18,7 +18,7 @@ from app.models import (
 )
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
-from app.unifi.client import get_unifi_client
+from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
 
 logger = logging.getLogger(__name__)
@@ -227,7 +227,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
     db.add(scan_start_event)
     db.commit()
 
-    client = get_unifi_client()
+    client = get_unifi_adapter()
     try:
         clients_data = client.get_clients()
     except UniFiError as exc:
