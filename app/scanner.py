@@ -20,6 +20,7 @@ from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
 from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
+from app.unifi.status import sanitize_unifi_error
 
 logger = logging.getLogger(__name__)
 
@@ -227,18 +228,20 @@ def _run_scan_locked(db: Session, source: str) -> dict:
     db.add(scan_start_event)
     db.commit()
 
-    client = get_unifi_adapter()
     try:
+        client = get_unifi_adapter()
         clients_data = client.get_clients()
     except UniFiError as exc:
-        message = f"Failed to fetch clients from UniFi: {exc}"
+        clean_msg = sanitize_unifi_error(str(exc))
+        message = f"Failed to fetch clients from UniFi: {clean_msg}"
         logger.error(message)
         scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
         db.add(scan_fail_event)
         db.commit()
         return {"success": False, "message": message, "devices_processed": 0}
     except Exception as exc:
-        message = f"Unexpected error communicating with UniFi: {exc}"
+        clean_msg = sanitize_unifi_error(str(exc))
+        message = f"Unexpected error communicating with UniFi: {clean_msg}"
         logger.error(message)
         scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
         db.add(scan_fail_event)

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
-from unittest.mock import MagicMock
+from datetime import UTC, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 from app.config import settings
 from app.db import Base, get_db
 from app.main import app
-from app.models import AuditLog, Device, Event
+from app.models import AuditLog, Device, Event, Setting, utcnow
 from app.security.service import invalidate_security_cache
 from app.services.context import system_context
 from app.services.devices import DeviceService, UnsupportedDeviceActionError
@@ -92,6 +92,26 @@ def test_sanitize_unifi_error_redacts_password(monkeypatch):
     assert "***" in cleaned
 
 
+def test_sanitize_unifi_error_redacts_app_secret_key(monkeypatch):
+    monkeypatch.setattr(settings, "APP_SECRET_KEY", SecretStr("myAppSecretKey4567!"))
+    raw = "Encrypted token error using secret key myAppSecretKey4567! during operation"
+    cleaned = sanitize_unifi_error(raw)
+    assert "myAppSecretKey4567!" not in cleaned
+    assert "***" in cleaned
+
+
+def test_sanitize_unifi_error_redacts_query_tokens_and_headers():
+    raw_query = "Error requesting https://unifi.local/api?token=sensitiveTokenValue123&site=default"
+    cleaned_query = sanitize_unifi_error(raw_query)
+    assert "sensitiveTokenValue123" not in cleaned_query
+    assert "token=***" in cleaned_query
+
+    raw_header = "Failed header validation X-API-KEY: rawSecretApiKeyVal789 on host"
+    cleaned_header = sanitize_unifi_error(raw_header)
+    assert "rawSecretApiKeyVal789" not in cleaned_header
+    assert "X-API-KEY: ***" in cleaned_header
+
+
 def test_sanitize_unifi_error_redacts_url_credentials():
     raw = "Failed connecting to https://admin:secretPass@192.168.1.1:8443/api"
     cleaned = sanitize_unifi_error(raw)
@@ -126,21 +146,21 @@ def test_get_adapter_info_uninitialized(monkeypatch):
     monkeypatch.setattr(settings, "UNIFI_API_MODE", "official")
     mode, adapter, caps = get_adapter_info()
     assert mode == "official"
-    assert adapter == "official"
-    assert caps.supports_pagination is True
+    assert adapter == "uninitialized"
+    assert caps.supports_pagination is False
     assert caps.can_block is False
 
     monkeypatch.setattr(settings, "UNIFI_API_MODE", "legacy")
     mode, adapter, caps = get_adapter_info()
     assert mode == "legacy"
-    assert adapter == "legacy"
-    assert caps.can_block is True
+    assert adapter == "uninitialized"
+    assert caps.can_block is False
     assert caps.supports_pagination is False
 
     monkeypatch.setattr(settings, "UNIFI_API_MODE", "auto")
     mode, adapter, caps = get_adapter_info()
     assert mode == "auto"
-    assert adapter == "unresolved"
+    assert adapter == "uninitialized"
     assert caps.can_block is False
 
 
@@ -156,6 +176,15 @@ def test_get_adapter_info_with_initialized_adapter(monkeypatch):
     assert mode == "auto"
     assert adapter == "official"
     assert caps.supports_pagination is True
+
+    mock_legacy = MagicMock(spec=LegacyUniFiAdapter)
+    mock_legacy.capabilities = LegacyUniFiAdapter.capabilities
+    factory._shared_adapter = mock_legacy
+
+    mode, adapter, caps = get_adapter_info()
+    assert mode == "auto"
+    assert adapter == "legacy"
+    assert caps.can_block is True
 
 
 def test_get_unifi_connection_status_no_db():
@@ -182,7 +211,7 @@ def test_get_unifi_connection_status_empty_db():
 def test_get_unifi_connection_status_successful_scan():
     db = TestingSessionLocal()
     try:
-        now = datetime(2026, 11, 9, 12, 0, 0, tzinfo=UTC)
+        now = utcnow()
         db.add(
             Event(
                 event_type="scan_finished",
@@ -199,6 +228,70 @@ def test_get_unifi_connection_status_successful_scan():
         assert status.last_scan_at.replace(tzinfo=UTC) == now
         assert status.last_successful_scan_at.replace(tzinfo=UTC) == now
         assert status.last_error is None
+    finally:
+        db.close()
+
+
+def test_get_unifi_connection_status_stale_scan():
+    db = TestingSessionLocal()
+    try:
+        # Default scan interval is 300 seconds. Scan from 15 minutes ago is stale.
+        stale_time = utcnow() - timedelta(minutes=15)
+        db.add(
+            Event(
+                event_type="scan_finished",
+                severity="info",
+                message="Scan finished. Processed 5 clients.",
+                created_at=stale_time,
+            )
+        )
+        db.commit()
+
+        status = get_unifi_connection_status(db)
+        assert status.connection_state == "degraded"
+        assert status.last_scan_result is True
+        assert status.last_scan_at.replace(tzinfo=UTC) == stale_time
+        assert status.last_successful_scan_at.replace(tzinfo=UTC) == stale_time
+    finally:
+        db.close()
+
+
+def test_get_unifi_connection_status_stale_scan_db_override():
+    db = TestingSessionLocal()
+    try:
+        # Override scan interval to 60 seconds via Setting in DB
+        db.add(Setting(key="scan_interval_seconds", value="60"))
+        db.commit()
+
+        # Threshold: max(60 * 2, 60 + 60) = 120s. A scan from 150s ago should be degraded.
+        stale_time = utcnow() - timedelta(seconds=150)
+        db.add(
+            Event(
+                event_type="scan_finished",
+                severity="info",
+                message="Scan finished. Processed 5 clients.",
+                created_at=stale_time,
+            )
+        )
+        db.commit()
+
+        status = get_unifi_connection_status(db)
+        assert status.connection_state == "degraded"
+
+        # A scan from 50s ago should NOT be degraded.
+        recent_time = utcnow() - timedelta(seconds=50)
+        db.add(
+            Event(
+                event_type="scan_finished",
+                severity="info",
+                message="Scan finished. Processed 5 clients.",
+                created_at=recent_time,
+            )
+        )
+        db.commit()
+
+        status = get_unifi_connection_status(db)
+        assert status.connection_state == "successful"
     finally:
         db.close()
 
@@ -473,7 +566,128 @@ def test_test_connection_unexpected_crash(monkeypatch):
     assert response.status_code == 500
     data = response.json()
     assert data["success"] is False
-    assert "Fatal hardware socket abort" in data["message"]
+    assert "Fatal hardware socket abort" not in data["message"]
+    assert "Unexpected error executing connection test" in data["message"]
+
+
+def test_unexpected_exception_in_test_connection_redaction(monkeypatch):
+    import app.unifi.factory as factory
+
+    mock_adapter = MagicMock(spec=LegacyUniFiAdapter)
+    mock_adapter.test_connection.side_effect = RuntimeError(
+        "Critical DB leak postgres://superuser:secretPassWord123@internal.db:5432/main"
+    )
+    factory._shared_adapter = mock_adapter
+
+    response = client.post("/api/unifi/test-connection", headers=AUTH)
+    assert response.status_code == 500
+    data = response.json()
+    assert data["success"] is False
+    # Raw internal exception details and credentials must never leak in response payload
+    assert "secretPassWord123" not in response.text
+    assert "postgres://" not in response.text
+    assert "Critical DB leak" not in response.text
+    assert (
+        data["message"]
+        == "Unexpected error executing connection test. Check application logs for details."
+    )
+
+
+@pytest.mark.asyncio
+async def test_startup_resilience_auto_mode_invalid_api_key(monkeypatch):
+    import app.unifi.factory as factory
+    from app.main import lifespan
+    from app.scanner import run_scan
+    from app.unifi.models import UniFiAuthError
+
+    monkeypatch.setattr(settings, "UNIFI_API_MODE", "auto")
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("invalid-api-key"))
+    factory.close_unifi_adapter()
+
+    # Mock probe to raise UniFiAuthError (401)
+    with (
+        patch("app.main.scheduler"),
+        patch("app.main.scheduled_oui_update"),
+        patch("app.unifi.official.OfficialUniFiAdapter.probe") as mock_probe,
+    ):
+        mock_probe.side_effect = UniFiAuthError(
+            "UniFi official API authentication failed: invalid API key (HTTP 401)"
+        )
+
+        # Verify lifespan warmup does not raise
+        async with lifespan(app):
+            # Lifespan started successfully without crashing
+            assert factory._shared_adapter is None
+
+            # Dashboard endpoint remains accessible and reports Not Initialized
+            resp_dash = client.get("/", headers=AUTH)
+            assert resp_dash.status_code == 200
+            assert "Not Initialized" in resp_dash.text
+
+            # Status endpoint remains accessible and reports uninitialized
+            resp_status = client.get("/api/unifi/status", headers=AUTH)
+            assert resp_status.status_code == 200
+            data = resp_status.json()
+            assert data["configured_mode"] == "auto"
+            assert data["active_adapter"] == "uninitialized"
+
+            # Connection test endpoint catches UniFiAuthError and returns 200 with sanitized error
+            resp_test = client.post("/api/unifi/test-connection", headers=AUTH)
+            assert resp_test.status_code == 200
+            data_test = resp_test.json()
+            assert data_test["success"] is False
+            assert "invalid API key" in data_test["message"]
+            assert data_test["adapter"] == "uninitialized"
+
+            # Background/manual scan records scan_failed event in DB
+            db = TestingSessionLocal()
+            try:
+                scan_res = run_scan(db)
+                assert scan_res["success"] is False
+                assert "invalid API key" in scan_res["message"]
+
+                failed_event = (
+                    db.query(Event)
+                    .filter(Event.event_type == "scan_failed")
+                    .order_by(Event.id.desc())
+                    .first()
+                )
+                assert failed_event is not None
+                assert "invalid API key" in failed_event.message
+
+                # get_unifi_connection_status now reports failed
+                conn_status = get_unifi_connection_status(db)
+                assert conn_status.connection_state == "failed"
+                assert "invalid API key" in conn_status.last_error
+            finally:
+                db.close()
+
+
+@pytest.mark.asyncio
+async def test_startup_resilience_controller_unavailable(monkeypatch):
+    import app.unifi.factory as factory
+    from app.main import lifespan
+    from app.unifi.models import UniFiConnectionError
+
+    monkeypatch.setattr(settings, "UNIFI_API_MODE", "official")
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-key"))
+    factory.close_unifi_adapter()
+
+    with (
+        patch("app.main.scheduler"),
+        patch("app.main.scheduled_oui_update"),
+        patch("app.main.get_unifi_client") as mock_warmup,
+    ):
+        mock_warmup.side_effect = UniFiConnectionError("Connection refused to 192.168.1.1:443")
+
+        # Lifespan should not crash
+        async with lifespan(app):
+            resp_dash = client.get("/", headers=AUTH)
+            assert resp_dash.status_code == 200
+
+            resp_status = client.get("/api/unifi/status", headers=AUTH)
+            assert resp_status.status_code == 200
+            assert resp_status.json()["active_adapter"] == "uninitialized"
 
 
 # ==============================================================================

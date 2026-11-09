@@ -67,7 +67,10 @@ def close_unifi_adapter() -> None:
 
 
 def get_adapter_info() -> tuple[str, str, UniFiCapabilities]:
-    """Return (configured_mode, active_adapter, capabilities) without network calls or probing."""
+    """Return (configured_mode, active_adapter, capabilities) without network calls or probing.
+
+    Accurately reflects uninitialized state when no active adapter singleton is instantiated.
+    """
     configured_mode = (settings.UNIFI_API_MODE or "legacy").strip().lower()
     global _shared_adapter
     if _shared_adapter is not None:
@@ -75,8 +78,4 @@ def get_adapter_info() -> tuple[str, str, UniFiCapabilities]:
             return configured_mode, "official", _shared_adapter.capabilities
         return configured_mode, "legacy", _shared_adapter.capabilities
 
-    if configured_mode == "official":
-        return configured_mode, "official", OfficialUniFiAdapter.capabilities
-    if configured_mode == "legacy":
-        return configured_mode, "legacy", LegacyUniFiAdapter.capabilities
-    return configured_mode, "unresolved", UniFiCapabilities()
+    return configured_mode, "uninitialized", UniFiCapabilities()

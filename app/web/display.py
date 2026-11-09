@@ -206,11 +206,12 @@ def build_dashboard_metrics(db: Session) -> dict:
 
 def format_adapter_name(adapter: str | None) -> str:
     """Format internal adapter identifier into human-readable label."""
-    if not adapter:
-        return "Unresolved"
+    if not adapter or str(adapter).lower() in ("uninitialized", "none"):
+        return "Not Initialized"
     mapping = {
         "official": "Official Network Integration API",
         "legacy": "Legacy Controller API",
+        "uninitialized": "Not Initialized",
         "unresolved": "Unresolved (Pending First Scan)",
     }
     return mapping.get(str(adapter).lower(), str(adapter).title())
@@ -235,7 +236,7 @@ def format_connection_state_label(state: str | None) -> str:
     mapping = {
         "successful": "Operational",
         "failed": "Connection Issue",
-        "degraded": "Degraded",
+        "degraded": "Stale Scan Data",
         "unknown": "Idle (No Scans Yet)",
     }
     return mapping.get(str(state).lower(), str(state).title())

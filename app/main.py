@@ -152,7 +152,10 @@ async def lifespan(app: FastAPI):
     scheduler.start()
 
     # Warm shared HTTP clients (closed on shutdown)
-    get_unifi_client()
+    try:
+        get_unifi_client()
+    except Exception as exc:
+        logger.warning("Initial UniFi adapter warmup deferred or encountered error: %s", exc)
 
     # Check if OUI DB is empty and trigger immediate download if so
     db = SessionLocal()

@@ -65,8 +65,26 @@ def sanitize_unifi_error(message: str | None) -> str | None:
     if password and password in cleaned:
         cleaned = cleaned.replace(password, "***")
 
-    # Redact basic auth in URLs
+    # Redact app secret key if present
+    app_secret = settings.app_secret_key().strip()
+    if app_secret and app_secret in cleaned:
+        cleaned = cleaned.replace(app_secret, "***")
+
+    # Redact basic auth in URLs (e.g. https://user:pass@host)
     cleaned = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", cleaned)
+
+    # Redact sensitive query parameters (token, key, password, secret, auth)
+    cleaned = re.sub(
+        r"(token|key|password|secret|auth)=([^&]+)", r"\1=***", cleaned, flags=re.IGNORECASE
+    )
+
+    # Redact sensitive headers (X-API-KEY, Authorization, Bearer, Cookie)
+    cleaned = re.sub(
+        r"(X-API-KEY|Authorization|Bearer|Cookie):\s*([^\s,]+)",
+        r"\1: ***",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
 
     # Shorten tracebacks if message contains multiline traceback
     if "Traceback (most recent call last):" in cleaned:
@@ -128,11 +146,27 @@ def get_unifi_connection_status(db: Session | None = None) -> UniFiConnectionSta
 
     last_scan_at = latest_event.created_at
     if latest_event.event_type == "scan_finished":
+        # Stale scan detection based on effective scan interval (including stored DB overrides)
+        from app.db import utcnow
+        from app.web.display import resolve_scan_interval
+
+        now = utcnow()
+        scan_time = (
+            last_scan_at
+            if last_scan_at.tzinfo is not None
+            else last_scan_at.replace(tzinfo=now.tzinfo)
+        )
+        elapsed_seconds = (now - scan_time).total_seconds()
+
+        interval_seconds, _ = resolve_scan_interval(db)
+        stale_threshold = max(interval_seconds * 2, interval_seconds + 60)
+        is_stale = elapsed_seconds > stale_threshold
+
         return UniFiConnectionStatus(
             configured_mode=configured_mode,
             active_adapter=active_adapter,
             configured_site=configured_site,
-            connection_state="successful",
+            connection_state="degraded" if is_stale else "successful",
             last_scan_at=last_scan_at,
             last_scan_result=True,
             last_successful_scan_at=last_scan_at,

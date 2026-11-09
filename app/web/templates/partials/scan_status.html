@@ -19,7 +19,7 @@
                     {% elif unifi_status.active_adapter == 'legacy' %}
                     <span class="w-2 h-2 rounded-full bg-primary"></span> Legacy API
                     {% else %}
-                    <span class="w-2 h-2 rounded-full bg-warning"></span> Unresolved
+                    <span class="w-2 h-2 rounded-full bg-outline"></span> Not Initialized
                     {% endif %}
                 </span>
             </div>
@@ -33,6 +33,10 @@
                     {% if unifi_status.connection_state == 'successful' %}
                     <span class="text-secondary flex items-center gap-1">
                         <span class="material-symbols-outlined text-[14px]">check_circle</span> Operational
+                    </span>
+                    {% elif unifi_status.connection_state == 'degraded' %}
+                    <span class="text-warning flex items-center gap-1">
+                        <span class="material-symbols-outlined text-[14px]">schedule</span> Stale Scan Data
                     </span>
                     {% elif unifi_status.connection_state == 'failed' %}
                     <span class="text-error flex items-center gap-1">

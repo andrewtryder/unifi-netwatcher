@@ -7,6 +7,9 @@
             {% if unifi_status.connection_state == 'successful' %}
             <span class="w-2 h-2 rounded-full bg-secondary animate-pulse"></span>
             <span class="text-secondary">Controller Connected</span>
+            {% elif unifi_status.connection_state == 'degraded' %}
+            <span class="w-2 h-2 rounded-full bg-warning"></span>
+            <span class="text-warning">Scan Data Stale</span>
             {% elif unifi_status.connection_state == 'failed' %}
             <span class="w-2 h-2 rounded-full bg-error animate-pulse"></span>
             <span class="text-error">Controller Disconnected</span>
@@ -91,6 +94,10 @@
                 {% if unifi_status.connection_state == 'successful' %}
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">
                     <span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Operational
+                </span>
+                {% elif unifi_status.connection_state == 'degraded' %}
+                <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-warning/10 text-warning border border-warning/20">
+                    <span class="w-1.5 h-1.5 rounded-full bg-warning"></span> Stale Scan Data
                 </span>
                 {% elif unifi_status.connection_state == 'failed' %}
                 <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-error/10 text-error border border-error/20">
