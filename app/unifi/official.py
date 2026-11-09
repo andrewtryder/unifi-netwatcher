@@ -278,16 +278,19 @@ class OfficialUniFiAdapter(UniFiAdapter):
                     mac = normalize_mac(raw_mac)
                     if not mac:
                         logger.debug(
-                            "Skipping client %s (type=%s, name=%s): invalid MAC address %r",
+                            "Skipping client %s (type=%s, name=%s): invalid hardware address format",
                             item.get("id"),
                             item.get("type"),
                             item.get("name"),
-                            raw_mac,
                         )
                         continue
 
                     if mac in seen_macs:
-                        logger.debug("Skipping duplicate client MAC %s on site %s", mac, site_id)
+                        logger.debug(
+                            "Skipping duplicate client %s on site %s",
+                            item.get("id"),
+                            site_id,
+                        )
                         continue
 
                     seen_macs.add(mac)
