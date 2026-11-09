@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlparse
 
@@ -124,8 +125,6 @@ class Settings(BaseSettings):
         path = (value or "").strip()
         if not path:
             return ""
-        from pathlib import Path
-
         if not Path(path).is_file():
             raise ValueError(f"UNIFI_CA_BUNDLE path does not exist: {path}")
         return path

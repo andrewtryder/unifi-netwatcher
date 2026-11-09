@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
@@ -24,7 +25,11 @@ from app.security.csp import CSPMiddleware
 from app.security.middleware import AccessControlMiddleware
 from app.security.models import SecuritySettings
 from app.security.routes import router as security_router
-from app.security.secrets import SecretKeyError, init_app_secrets
+from app.security.secrets import (
+    SecretKeyError,
+    cleanup_key_rotation_backup,
+    init_app_secrets,
+)
 from app.security.service import ensure_security_settings
 from app.unifi.client import close_unifi_client, get_unifi_client
 from app.web.display import (
@@ -91,8 +96,6 @@ def reschedule_scan_job(seconds: int) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    from pathlib import Path
-
     init_app_secrets(
         env_secret=settings.app_secret_key(),
         key_path=Path(settings.APP_SECRET_KEY_PATH),
@@ -107,8 +110,6 @@ async def lifespan(app: FastAPI):
         ensure_security_settings(db)
         try:
             migrate_notification_secrets(db)
-            from app.security.secrets import cleanup_key_rotation_backup
-
             cleanup_key_rotation_backup(Path(settings.APP_SECRET_KEY_PATH))
         except SecretKeyError:
             logger.exception("Notification secret migration failed")

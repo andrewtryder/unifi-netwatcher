@@ -17,6 +17,7 @@ from app.models import (
     OuiEntry,
 )
 from app.notifications import PROVIDERS
+from app.security.crypto_migrate import load_channel_config
 from app.unifi.client import get_unifi_client
 
 logger = logging.getLogger(__name__)
@@ -173,8 +174,6 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
                 continue
 
             try:
-                from app.security.crypto_migrate import load_channel_config
-
                 config = load_channel_config(channel)
                 if not isinstance(config, dict):
                     raise ValueError("Invalid channel configuration")

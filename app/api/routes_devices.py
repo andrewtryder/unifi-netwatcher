@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.db import get_db
+from app.models import Device
 from app.schemas import BulkDeviceIdsRequest, NotesRequest, RenameRequest
 from app.services.context import request_context_from_request
 from app.services.devices import (
@@ -22,8 +23,6 @@ __all__ = ["router", "log_action", "get_device_or_404"]
 
 
 def get_device_or_404(db: Session, device_id: int):
-    from app.models import Device
-
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
