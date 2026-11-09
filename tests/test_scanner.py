@@ -146,3 +146,40 @@ def test_alerts_sent_after_scan_commit(db_session, monkeypatch):
     send_calls.clear()
     run_scan(db_session)
     assert send_calls == []
+
+
+def test_run_scan_empty_site_succeeds(db_session, monkeypatch):
+    from app.unifi import get_unifi_client
+
+    client = get_unifi_client()
+    monkeypatch.setattr(client, "get_clients", lambda: [])
+
+    result = run_scan(db_session)
+    assert result["success"] is True
+    assert result["devices_processed"] == 0
+    assert "0 active clients" in result["message"]
+
+    finished = db_session.query(Event).filter(Event.event_type == "scan_finished").all()
+    assert len(finished) == 1
+    failed = db_session.query(Event).filter(Event.event_type == "scan_failed").all()
+    assert len(failed) == 0
+
+
+def test_run_scan_unifi_error_records_failure(db_session, monkeypatch):
+    from app.unifi import UniFiAuthError, get_unifi_client
+
+    client = get_unifi_client()
+
+    def raise_auth():
+        raise UniFiAuthError("Invalid username or password")
+
+    monkeypatch.setattr(client, "get_clients", raise_auth)
+
+    result = run_scan(db_session)
+    assert result["success"] is False
+    assert result["devices_processed"] == 0
+    assert "Invalid username or password" in result["message"]
+
+    failed = db_session.query(Event).filter(Event.event_type == "scan_failed").all()
+    assert len(failed) == 1
+    assert "Invalid username or password" in failed[0].message

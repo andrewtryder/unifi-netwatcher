@@ -32,7 +32,10 @@ def rekey_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("APP_SECRET_KEY", raising=False)
     monkeypatch.delenv("OLD_APP_SECRET_KEY", raising=False)
     key_path = tmp_path / "app-secret.key"
-    old_key = Fernet.generate_key()
+    while True:
+        old_key = Fernet.generate_key()
+        if not old_key.startswith(b"-"):
+            break
     write_key_file(key_path, old_key)
     old_fernet = Fernet(old_key.strip())
 

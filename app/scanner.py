@@ -18,7 +18,8 @@ from app.models import (
 )
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
-from app.unifi.client import get_unifi_client
+from app.unifi import get_unifi_adapter
+from app.unifi.models import UniFiError, as_bool, as_int
 
 logger = logging.getLogger(__name__)
 
@@ -34,29 +35,8 @@ class AlertIntent:
     message: str
 
 
-def _as_int(value) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except TypeError, ValueError:
-        return None
-
-
-def _as_bool(value) -> bool | None:
-    if value is None:
-        return None
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"1", "true", "yes"}:
-            return True
-        if lowered in {"0", "false", "no"}:
-            return False
-    return None
+_as_int = as_int
+_as_bool = as_bool
 
 
 def _client_telemetry(c: dict) -> dict:
@@ -247,20 +227,33 @@ def _run_scan_locked(db: Session, source: str) -> dict:
     db.add(scan_start_event)
     db.commit()
 
-    client = get_unifi_client()
-    clients_data = client.get_clients()
-
-    if not clients_data and not client.mock_mode:
-        message = (
-            "Failed to fetch clients from UniFi. "
-            "Check UNIFI_URL, credentials, and SSL settings, or set UNIFI_MOCK_MODE=true for testing."
-        )
+    client = get_unifi_adapter()
+    try:
+        clients_data = client.get_clients()
+    except UniFiError as exc:
+        message = f"Failed to fetch clients from UniFi: {exc}"
+        logger.error(message)
+        scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
+        db.add(scan_fail_event)
+        db.commit()
+        return {"success": False, "message": message, "devices_processed": 0}
+    except Exception as exc:
+        message = f"Unexpected error communicating with UniFi: {exc}"
+        logger.error(message)
         scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
         db.add(scan_fail_event)
         db.commit()
         return {"success": False, "message": message, "devices_processed": 0}
 
     now = utcnow()
+
+    if not clients_data:
+        message = "Scan completed: 0 active clients on UniFi site"
+        logger.info(message)
+        scan_finish_event = Event(event_type="scan_finished", severity="info", message=message)
+        db.add(scan_finish_event)
+        db.commit()
+        return {"success": True, "message": message, "devices_processed": 0}
 
     # Normalize MACs and prepare batch lookups
     prepared: list[tuple[str, dict]] = []
@@ -342,7 +335,7 @@ def _run_scan_locked(db: Session, source: str) -> dict:
                 site=site,
                 ssid=ssid,
                 ap_mac=ap_mac,
-                raw_json=c,
+                raw_json=c.raw_data if hasattr(c, "raw_data") else c,
                 seen_at=now,
             )
         )
