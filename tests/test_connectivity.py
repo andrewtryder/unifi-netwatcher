@@ -116,6 +116,7 @@ def test_rule_e_reconnection_after_offline():
     assert transition.new_state == ConnectivityState.ONLINE.value
     assert "Laptop-Pro" in transition.event_message
     assert transition.event_metadata["mac"] == "11:22:33:44:55:66"
+    assert transition.event_metadata["offline_duration_seconds"] == 2700.0
 
     assert device.connectivity_state == ConnectivityState.ONLINE.value
     assert device.last_connected_at == t_reconnect
@@ -184,6 +185,7 @@ def test_rule_d_confirmed_offline_both_conditions_met():
         connectivity_state=ConnectivityState.ONLINE.value,
         consecutive_missed_scans=1,
         offline_candidate_since=t0,
+        last_connected_at=t0 - timedelta(hours=1),
     )
 
     transition = service.handle_absent_device(device, t_confirm)
@@ -193,6 +195,7 @@ def test_rule_d_confirmed_offline_both_conditions_met():
     assert transition.new_state == ConnectivityState.OFFLINE.value
     assert "Smart-TV" in transition.event_message
     assert transition.event_metadata["consecutive_missed_scans"] == 2
+    assert transition.event_metadata["online_duration_seconds"] == 4250.0
 
     assert device.connectivity_state == ConnectivityState.OFFLINE.value
     assert device.last_disconnected_at == t_confirm
@@ -251,7 +254,7 @@ def test_offline_device_stays_offline_no_duplicate_events():
     transition = service.handle_absent_device(device, t_next)
     assert transition is None
     assert device.connectivity_state == ConnectivityState.OFFLINE.value
-    assert device.consecutive_missed_scans == 6
+    assert device.consecutive_missed_scans == 5
 
 
 def test_brief_disappearance_recovers_without_events():
@@ -627,5 +630,228 @@ def test_scanner_no_behavioral_notifications_sent(monkeypatch):
         deliveries = db.query(NotificationDelivery).all()
         assert len(deliveries) == 0
         assert len(send_calls) == 0
+    finally:
+        db.close()
+
+
+def test_scanner_rejects_none_clients_data_as_scan_failed(monkeypatch):
+    """Finding 1: None returned from get_clients must produce scan_failed without advancing missed-scans."""
+    db = TestingSessionLocal()
+    try:
+        t0 = utcnow()
+        dev = Device(
+            mac="11:22:33:44:55:66",
+            hostname="Online-Device",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=1,
+            offline_candidate_since=t0,
+        )
+        db.add(dev)
+        db.commit()
+
+        mock_adapter = MagicMock(spec=UniFiAdapter)
+        mock_adapter.get_clients.return_value = None
+        import app.unifi.factory as factory
+
+        factory._shared_adapter = mock_adapter
+
+        result = run_scan(db)
+        assert result["success"] is False
+        assert "expected list, got None" in result["message"]
+
+        # Confirm scan_failed event recorded
+        failed_event = db.query(Event).filter(Event.event_type == "scan_failed").first()
+        assert failed_event is not None
+        assert "expected list, got None" in failed_event.message
+
+        # Verify device state and counters remain untouched
+        db.refresh(dev)
+        assert dev.connectivity_state == ConnectivityState.ONLINE.value
+        assert dev.consecutive_missed_scans == 1
+        assert dev.offline_candidate_since.replace(tzinfo=UTC) == t0
+    finally:
+        db.close()
+
+
+def test_scanner_rejects_non_list_clients_data(monkeypatch):
+    """Finding 1: Non-list returned from get_clients must produce scan_failed."""
+    db = TestingSessionLocal()
+    try:
+        dev = Device(
+            mac="11:22:33:44:55:77",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=0,
+        )
+        db.add(dev)
+        db.commit()
+
+        mock_adapter = MagicMock(spec=UniFiAdapter)
+        mock_adapter.get_clients.return_value = {"clients": []}
+        import app.unifi.factory as factory
+
+        factory._shared_adapter = mock_adapter
+
+        result = run_scan(db)
+        assert result["success"] is False
+        assert "expected list, got dict" in result["message"]
+
+        db.refresh(dev)
+        assert dev.connectivity_state == ConnectivityState.ONLINE.value
+        assert dev.consecutive_missed_scans == 0
+    finally:
+        db.close()
+
+
+def test_scanner_rejects_malformed_client_entry(monkeypatch):
+    """Finding 1: Malformed entries in clients_data produce scan_failed without modifying devices."""
+    db = TestingSessionLocal()
+    try:
+        dev = Device(
+            mac="11:22:33:44:55:88",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=0,
+        )
+        db.add(dev)
+        db.commit()
+
+        mock_adapter = MagicMock(spec=UniFiAdapter)
+        mock_adapter.get_clients.return_value = ["not-a-mapping-or-dict"]
+        import app.unifi.factory as factory
+
+        factory._shared_adapter = mock_adapter
+
+        result = run_scan(db)
+        assert result["success"] is False
+        assert "malformed device entry" in result["message"]
+
+        db.refresh(dev)
+        assert dev.connectivity_state == ConnectivityState.ONLINE.value
+        assert dev.consecutive_missed_scans == 0
+    finally:
+        db.close()
+
+
+def test_scanner_reconciliation_failure_rolls_back_partial_changes(monkeypatch):
+    """Finding 2: Errors during reconciliation roll back all partial device modifications."""
+    db = TestingSessionLocal()
+    try:
+        dev1 = Device(
+            mac="11:22:33:44:55:11",
+            hostname="Device-1",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=0,
+        )
+        dev2 = Device(
+            mac="11:22:33:44:55:22",
+            hostname="Device-2",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=0,
+        )
+        db.add_all([dev1, dev2])
+        db.commit()
+
+        # Mock adapter with an empty client list so both devices enter absent pass
+        mock_adapter = MagicMock(spec=UniFiAdapter)
+        mock_adapter.get_clients.return_value = []
+        import app.unifi.factory as factory
+
+        factory._shared_adapter = mock_adapter
+
+        # Inject an error when handling dev2 in the absent pass
+        original_handle_absent = ConnectivityService.handle_absent_device
+        call_count = 0
+
+        def flaky_handle_absent(self, device, now):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("Simulated unhandled reconciliation failure on device 2")
+            return original_handle_absent(self, device, now)
+
+        monkeypatch.setattr(ConnectivityService, "handle_absent_device", flaky_handle_absent)
+
+        result = run_scan(db)
+        assert result["success"] is False
+        assert "Scan failed during reconciliation" in result["message"]
+        assert "Simulated unhandled reconciliation failure" in result["message"]
+
+        # Confirm scan_failed event was recorded on a best-effort basis
+        failed_event = (
+            db.query(Event)
+            .filter(
+                Event.event_type == "scan_failed",
+                Event.message.contains("Simulated unhandled reconciliation failure"),
+            )
+            .first()
+        )
+        assert failed_event is not None
+
+        # Verify that dev1's modification was rolled back and NOT committed
+        db.refresh(dev1)
+        db.refresh(dev2)
+        assert dev1.consecutive_missed_scans == 0
+        assert dev1.connectivity_state == ConnectivityState.ONLINE.value
+        assert dev2.consecutive_missed_scans == 0
+        assert dev2.connectivity_state == ConnectivityState.ONLINE.value
+    finally:
+        db.close()
+
+
+def test_scanner_evaluates_only_online_devices_in_absence_pass(monkeypatch):
+    """Finding 4: Absence pass queries only online devices; offline and unknown are not scanned or incremented."""
+    db = TestingSessionLocal()
+    try:
+        t0 = utcnow()
+        dev_online = Device(
+            mac="11:22:33:44:55:01",
+            hostname="Device-Online",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.ONLINE.value,
+            consecutive_missed_scans=0,
+        )
+        dev_offline = Device(
+            mac="11:22:33:44:55:02",
+            hostname="Device-Offline",
+            status=DeviceStatus.TRUSTED.value,
+            connectivity_state=ConnectivityState.OFFLINE.value,
+            consecutive_missed_scans=5,
+            last_disconnected_at=t0 - timedelta(hours=2),
+        )
+        dev_unknown = Device(
+            mac="11:22:33:44:55:03",
+            hostname="Device-Unknown",
+            status=DeviceStatus.UNKNOWN.value,
+            connectivity_state=ConnectivityState.UNKNOWN.value,
+            consecutive_missed_scans=0,
+        )
+        db.add_all([dev_online, dev_offline, dev_unknown])
+        db.commit()
+
+        mock_adapter = MagicMock(spec=UniFiAdapter)
+        mock_adapter.get_clients.return_value = []
+        import app.unifi.factory as factory
+
+        factory._shared_adapter = mock_adapter
+
+        result = run_scan(db)
+        assert result["success"] is True
+
+        db.refresh(dev_online)
+        db.refresh(dev_offline)
+        db.refresh(dev_unknown)
+
+        # dev_online was absent so its missed scans incremented
+        assert dev_online.consecutive_missed_scans == 1
+
+        # dev_offline was filtered out of absence query; missed scans remains 5
+        assert dev_offline.consecutive_missed_scans == 5
+
+        # dev_unknown was filtered out of absence query; missed scans remains 0
+        assert dev_unknown.consecutive_missed_scans == 0
     finally:
         db.close()

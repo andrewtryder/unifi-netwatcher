@@ -63,3 +63,4 @@ def downgrade() -> None:
         batch_op.drop_column("last_disconnected_at")
         batch_op.drop_column("last_connected_at")
         batch_op.drop_column("connectivity_state")
+

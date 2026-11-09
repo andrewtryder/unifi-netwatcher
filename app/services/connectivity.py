@@ -105,6 +105,15 @@ class ConnectivityService:
 
         if prev_state == ConnectivityState.OFFLINE.value:
             # Rule E — Reconnection
+            offline_duration_seconds: float | None = None
+            if device.last_disconnected_at:
+                last_disconnected = (
+                    device.last_disconnected_at
+                    if device.last_disconnected_at.tzinfo is not None
+                    else device.last_disconnected_at.replace(tzinfo=now.tzinfo)
+                )
+                offline_duration_seconds = max(0.0, (now - last_disconnected).total_seconds())
+
             device.last_connected_at = now
             display_name = device.display_name or device.hostname or device.name or device.mac
             msg = f"Device reconnected: {display_name} ({device.mac})"
@@ -114,6 +123,7 @@ class ConnectivityService:
                 "mac": device.mac,
                 "ip": device.ip,
                 "hostname": device.hostname,
+                "offline_duration_seconds": offline_duration_seconds,
                 "last_disconnected_at": (
                     device.last_disconnected_at.isoformat() if device.last_disconnected_at else None
                 ),
@@ -155,9 +165,8 @@ class ConnectivityService:
                 device.consecutive_missed_scans = 0
             return None
 
-        # Rule D: Already offline devices remain offline
+        # Rule D: Already offline devices remain offline (no counter increments)
         if current_state == ConnectivityState.OFFLINE.value:
-            device.consecutive_missed_scans = (device.consecutive_missed_scans or 0) + 1
             return None
 
         # Rule C: Device was online, now absent
@@ -183,6 +192,16 @@ class ConnectivityService:
             device.last_disconnected_at = now
             display_name = device.display_name or device.hostname or device.name or device.mac
             msg = f"Device disconnected: {display_name} ({device.mac})"
+
+            online_duration_seconds: float | None = None
+            if device.last_connected_at:
+                last_connected = (
+                    device.last_connected_at
+                    if device.last_connected_at.tzinfo is not None
+                    else device.last_connected_at.replace(tzinfo=now.tzinfo)
+                )
+                online_duration_seconds = max(0.0, (now - last_connected).total_seconds())
+
             meta = {
                 "previous_state": ConnectivityState.ONLINE.value,
                 "new_state": ConnectivityState.OFFLINE.value,
@@ -190,6 +209,10 @@ class ConnectivityService:
                 "ip": device.ip,
                 "hostname": device.hostname,
                 "consecutive_missed_scans": device.consecutive_missed_scans,
+                "online_duration_seconds": online_duration_seconds,
+                "last_connected_at": (
+                    device.last_connected_at.isoformat() if device.last_connected_at else None
+                ),
                 "last_seen_at": (device.last_seen_at.isoformat() if device.last_seen_at else None),
                 "offline_candidate_since": device.offline_candidate_since.isoformat(),
             }
