@@ -319,3 +319,136 @@ def test_alerts_respect_cooldown(monkeypatch):
     assert len(send_calls) == first
     db.close()
     Base.metadata.drop_all(bind=engine)
+
+
+def test_apprise_config_schema():
+    from app.notifications.schemas import AppriseConfig, parse_notification_config
+
+    cfg = AppriseConfig(url="discord://123456789/mytoken")
+    assert cfg.url == "discord://123456789/mytoken"
+    assert cfg.allow_private_network is False
+
+    cfg_priv = AppriseConfig(url="gotifys://192.168.1.10/token", allow_private_network=True)
+    assert cfg_priv.allow_private_network is True
+
+    parsed = parse_notification_config(
+        "apprise", '{"url": "discord://12345/token", "allow_private_network": true}'
+    )
+    assert parsed["url"] == "discord://12345/token"
+    assert parsed["allow_private_network"] is True
+    assert "type" not in parsed
+
+    with pytest.raises(ValueError):
+        AppriseConfig(url="")
+
+    with pytest.raises(ValueError, match="File schemes"):
+        AppriseConfig(url="file:///etc/passwd")
+
+    with pytest.raises(ValueError, match="must include a scheme"):
+        AppriseConfig(url="not-a-valid-scheme-url")
+
+
+def test_extract_apprise_target():
+    from app.notifications.apprise import extract_apprise_target
+
+    assert extract_apprise_target("") == (None, None)
+    assert extract_apprise_target("file:///etc/passwd") == (None, None)
+    assert extract_apprise_target("invalid") == (None, None)
+
+    h, p = extract_apprise_target("gotifys://192.168.1.100:8443/token")
+    assert h == "192.168.1.100"
+    assert p == 8443
+
+    h, p = extract_apprise_target("discord://123456789/mytoken")
+    assert h == "discord.com"
+    assert p == 443
+
+    h, p = extract_apprise_target("ntfys://my-topic")
+    assert h == "ntfy.sh"
+    assert p == 443
+
+
+def test_validate_apprise_target_ssrf(monkeypatch):
+    from app.notifications.apprise import validate_apprise_target_ssrf
+    from app.notifications.ssrf import WebhookURLError
+
+    assert not validate_apprise_target_ssrf("")
+    assert not validate_apprise_target_ssrf("127.0.0.1", 80, allow_private_network=True)
+    assert not validate_apprise_target_ssrf("169.254.169.254", 80, allow_private_network=True)
+    assert not validate_apprise_target_ssrf("192.168.1.50", 80, allow_private_network=False)
+    assert validate_apprise_target_ssrf("192.168.1.50", 80, allow_private_network=True)
+    assert validate_apprise_target_ssrf("10.0.0.1", 443, allow_private_network=True)
+
+    def mock_resolve_blocked(host, port, allow_private_network=False):
+        raise WebhookURLError("Blocked host")
+
+    monkeypatch.setattr("app.notifications.apprise._resolve_allowed_ips", mock_resolve_blocked)
+    assert not validate_apprise_target_ssrf("example.internal", 443, allow_private_network=False)
+
+    def mock_resolve_ok(host, port, allow_private_network=False):
+        return []
+
+    monkeypatch.setattr("app.notifications.apprise._resolve_allowed_ips", mock_resolve_ok)
+    assert validate_apprise_target_ssrf("valid.example.com", 443, allow_private_network=False)
+
+
+def test_apprise_provider_validation_and_send(monkeypatch):
+    import apprise
+    from app.notifications import PROVIDERS
+    from app.notifications.apprise import AppriseProvider
+
+    assert "apprise" in PROVIDERS
+    provider = PROVIDERS["apprise"]
+    assert isinstance(provider, AppriseProvider)
+
+    assert not provider.validate_config({})
+    assert not provider.validate_config({"url": "file:///etc/passwd"})
+    assert not provider.validate_config({"url": "gotifys://127.0.0.1/token"})
+
+    # Valid config with private LAN allowed
+    assert provider.validate_config(
+        {"url": "gotifys://192.168.1.50/token", "allow_private_network": True}
+    )
+
+    # Missing URL in send
+    success, sc, resp, err = provider.send("Alert", {})
+    assert success is False
+    assert "Missing Apprise URL" in err
+
+    # SSRF blocked in send
+    success, sc, resp, err = provider.send("Alert", {"url": "gotifys://127.0.0.1/token"})
+    assert success is False
+    assert "blocked" in err.lower()
+
+    # Successful notify
+    monkeypatch.setattr(apprise.Apprise, "notify", lambda self, body="", title="", **kw: True)
+    success, sc, resp, err = provider.send(
+        "Device joined!",
+        {"url": "gotifys://192.168.1.50/token", "allow_private_network": True},
+    )
+    assert success is True
+    assert sc == 200
+    assert "Delivered via Apprise" in resp
+
+    # Failed notify
+    monkeypatch.setattr(apprise.Apprise, "notify", lambda self, body="", title="", **kw: False)
+    success, sc, resp, err = provider.send(
+        "Device joined!",
+        {"url": "gotifys://192.168.1.50/token", "allow_private_network": True},
+    )
+    assert success is False
+    assert sc == 500
+    assert "failed" in err.lower()
+
+    # Exception during notify
+    def raise_err(*args, **kwargs):
+        raise RuntimeError("Apprise connection crash")
+
+    monkeypatch.setattr(apprise.Apprise, "notify", raise_err)
+    success, sc, resp, err = provider.send(
+        "Device joined!",
+        {"url": "gotifys://192.168.1.50/token", "allow_private_network": True},
+    )
+    assert success is False
+    assert sc == 0
+    assert "Apprise connection crash" in err

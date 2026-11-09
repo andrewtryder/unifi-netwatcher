@@ -2,6 +2,7 @@
   const typeSelect = document.getElementById("channel-type");
   const pushoverConfig = document.getElementById("pushover-config");
   const webhookConfig = document.getElementById("webhook-config");
+  const appriseConfig = document.getElementById("apprise-config");
   const form = document.getElementById("create-channel-form");
   const configInput = document.getElementById("config_json");
   const pushoverUser = document.getElementById("pushover-user");
@@ -12,6 +13,8 @@
   const webhookBodySection = document.getElementById("webhook-body-section");
   const webhookGetSection = document.getElementById("webhook-get-section");
   const webhookAllowPrivate = document.getElementById("webhook-allow-private");
+  const appriseUrl = document.getElementById("apprise-url");
+  const appriseAllowPrivate = document.getElementById("apprise-allow-private");
   if (!form || !typeSelect) return;
 
   function updateWebhookMethodFields() {
@@ -22,12 +25,23 @@
   }
 
   function updateConfigVisibility() {
-    const isPushover = typeSelect.value === "pushover";
+    const val = typeSelect.value;
+    const isPushover = val === "pushover";
+    const isWebhook = val === "webhook";
+    const isApprise = val === "apprise";
+
     pushoverConfig.classList.toggle("hidden", !isPushover);
-    webhookConfig.classList.toggle("hidden", isPushover);
+    webhookConfig.classList.toggle("hidden", !isWebhook);
+    if (appriseConfig) {
+      appriseConfig.classList.toggle("hidden", !isApprise);
+    }
+
     pushoverUser.required = isPushover;
     pushoverToken.required = isPushover;
-    webhookUrl.required = !isPushover;
+    webhookUrl.required = isWebhook;
+    if (appriseUrl) {
+      appriseUrl.required = isApprise;
+    }
     updateWebhookMethodFields();
   }
 
@@ -55,6 +69,16 @@
       configInput.value = JSON.stringify({
         user: pushoverUser.value.trim(),
         token: pushoverToken.value.trim(),
+      });
+    } else if (typeSelect.value === "apprise") {
+      if (!appriseUrl || !appriseUrl.value.trim()) {
+        event.preventDefault();
+        alert("Please enter an Apprise service URL.");
+        return;
+      }
+      configInput.value = JSON.stringify({
+        url: appriseUrl.value.trim(),
+        allow_private_network: !!(appriseAllowPrivate && appriseAllowPrivate.checked),
       });
     } else {
       if (!webhookUrl.value.trim()) {

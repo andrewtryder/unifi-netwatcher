@@ -145,7 +145,7 @@ class NotificationChannel(Base):
     __tablename__ = "notification_channels"
     __table_args__ = (
         CheckConstraint(
-            "type IN ('webhook','pushover')",
+            "type IN ('webhook','pushover','apprise')",
             name="ck_notification_channels_type",
         ),
     )

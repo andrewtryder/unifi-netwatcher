@@ -66,8 +66,26 @@ class PushoverConfig(BaseModel):
         return value
 
 
+class AppriseConfig(BaseModel):
+    type: Literal["apprise"] = "apprise"
+    url: Annotated[str, Field(min_length=3, max_length=2048)]
+    allow_private_network: bool = False
+
+    @field_validator("url")
+    @classmethod
+    def _validate_apprise_url(cls, value: str) -> str:
+        clean = value.strip()
+        if not clean:
+            raise ValueError("Apprise URL is required")
+        if clean.lower().startswith(("file:", "file/")):
+            raise ValueError("File schemes are not permitted")
+        if "://" not in clean:
+            raise ValueError("Apprise URL must include a scheme (e.g. gotifys://, discord://)")
+        return clean
+
+
 NotificationConfig = Annotated[
-    WebhookConfig | PushoverConfig,
+    WebhookConfig | PushoverConfig | AppriseConfig,
     Field(discriminator="type"),
 ]
 
@@ -86,6 +104,8 @@ def parse_notification_config(channel_type: str, raw: dict[str, Any] | str) -> d
         model = WebhookConfig.model_validate(payload)
     elif channel_type == "pushover":
         model = PushoverConfig.model_validate(payload)
+    elif channel_type == "apprise":
+        model = AppriseConfig.model_validate(payload)
     else:
         raise ValueError(f"Unsupported notification type: {channel_type}")
     data = model.model_dump(mode="json")
