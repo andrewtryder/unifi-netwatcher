@@ -19,7 +19,7 @@ COPY . /app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev --no-install-project
 
-FROM python:3.14-slim-bookworm
+FROM python:3.15-slim-bookworm
 WORKDIR /app
 
 RUN rm -rf /usr/local/lib/python3.14/site-packages/* /usr/local/bin/pip* \
