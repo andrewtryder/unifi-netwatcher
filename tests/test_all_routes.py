@@ -204,6 +204,28 @@ def test_test_channel(mock_send, mock_resolve):
     assert response.status_code == 200
 
 
+def test_create_and_test_apprise_channel():
+    with (
+        patch("app.notifications.apprise.AppriseProvider.validate_config", return_value=True),
+        patch(
+            "app.notifications.apprise.AppriseProvider.send",
+            return_value=(True, 200, "Delivered via Apprise", ""),
+        ),
+    ):
+        response = client.post(
+            "/api/notifications/htmx/create",
+            data={
+                "name": "My Discord",
+                "type": "apprise",
+                "config_json": '{"url": "discord://123456789/mytoken", "allow_private_network": false}',
+            },
+            headers=AUTH,
+        )
+        assert response.status_code == 200
+        assert "My Discord" in response.text
+        assert "apprise" in response.text
+
+
 # API Import/Export
 def test_export_csv():
     response = client.get("/tools/export/csv", headers=AUTH)

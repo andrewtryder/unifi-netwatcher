@@ -47,12 +47,13 @@
                         Channel Type
                         <span class="field-help" tabindex="0">
                             <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
-                            <span class="field-help-tip">How alerts are delivered. Pushover sends to the Pushover app on your phone. Webhook posts to a custom URL.</span>
+                            <span class="field-help-tip">How alerts are delivered. Pushover sends to your phone, Webhook posts to a custom JSON endpoint, and Apprise connects to Gotify, ntfy, Discord, Telegram, and 80+ other services.</span>
                         </span>
                     </label>
                     <select id="channel-type" name="type" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5">
                         <option value="pushover">Pushover</option>
                         <option value="webhook">Webhook</option>
+                        <option value="apprise">Apprise (Gotify, ntfy, Discord, etc.)</option>
                     </select>
                 </div>
 
@@ -137,6 +138,36 @@
                             <span class="block text-xs mt-0.5">
                                 Enables HTTPS webhooks to RFC1918/ULA addresses. Loopback, link-local, and cloud
                                 metadata IPs remain blocked. Only enable for trusted internal endpoints.
+                            </span>
+                        </span>
+                    </label>
+                </div>
+
+                <div id="apprise-config" class="hidden flex flex-col gap-4">
+                    <div class="flex flex-col gap-1.5">
+                        <label for="apprise-url" class="text-sm font-medium text-on-surface-variant uppercase tracking-wider font-mono flex items-center gap-1.5">
+                            Apprise Service URL
+                            <span class="field-help" tabindex="0">
+                                <span class="material-symbols-outlined text-base text-primary cursor-help">help</span>
+                                <span class="field-help-tip">The destination service URL using Apprise format. Examples: gotifys://my-host/token, ntfys://topic, discord://webhook_id/webhook_token, tgram://bottoken/chatid.</span>
+                            </span>
+                        </label>
+                        <input type="text" id="apprise-url" autocomplete="off" class="bg-background border border-outline text-on-surface text-sm rounded-lg focus:ring-primary focus:border-primary block w-full p-2.5 font-mono" placeholder="gotifys://gotify.lan/token or ntfys://my-topic">
+                    </div>
+                    <div class="rounded-lg border border-outline bg-surface-variant/20 p-3 text-xs text-on-surface-variant flex flex-col gap-1">
+                        <span class="font-medium text-on-surface">Common URL formats:</span>
+                        <div>• <code class="font-mono text-primary">gotifys://host/token</code> — Gotify</div>
+                        <div>• <code class="font-mono text-primary">ntfys://topic</code> — ntfy.sh (cloud) or <code class="font-mono text-primary">ntfy://host/topic</code> (self-hosted)</div>
+                        <div>• <code class="font-mono text-primary">discord://webhook_id/webhook_token</code> — Discord</div>
+                        <div>• <code class="font-mono text-primary">tgram://bot_token/chat_id</code> — Telegram</div>
+                    </div>
+                    <label class="flex items-start gap-3 cursor-pointer rounded-lg border border-warning/40 bg-warning/5 p-3">
+                        <input type="checkbox" id="apprise-allow-private" value="on"
+                               class="mt-1 rounded border-outline text-warning focus:ring-warning">
+                        <span class="text-sm text-on-surface-variant">
+                            <span class="font-medium text-on-surface">Allow private LAN destinations</span>
+                            <span class="block text-xs mt-0.5">
+                                Enables connecting to RFC1918/ULA addresses (e.g. self-hosted Gotify or ntfy servers on your home network). Loopback, link-local, and cloud metadata IPs remain blocked.
                             </span>
                         </span>
                     </label>

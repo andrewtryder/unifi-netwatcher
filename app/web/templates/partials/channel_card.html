@@ -5,6 +5,8 @@
             <span class="material-symbols-outlined">smartphone</span>
             {% elif channel.type == 'webhook' %}
             <span class="material-symbols-outlined">webhook</span>
+            {% elif channel.type == 'apprise' %}
+            <span class="material-symbols-outlined">hub</span>
             {% else %}
             <span class="material-symbols-outlined">notifications</span>
             {% endif %}
