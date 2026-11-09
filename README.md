@@ -117,7 +117,13 @@ Copy `.env.example` (production / Docker) or `.env.development.example` (native 
 | `SCAN_INTERVAL_SECONDS` | How often to poll the controller for clients (seconds). Default: `300`. Overridable in **Tools**. |
 | `DEVICE_OFFLINE_MISSED_SCANS` | Consecutive missed scans required before marking an observed device offline. Default: `2` (minimum `2`). |
 | `DEVICE_OFFLINE_GRACE_SECONDS` | Minimum seconds a device must remain absent before transitioning to offline. Default: `600` (10 minutes). |
-| `ALERT_COOLDOWN_SECONDS` | Minimum time between repeat alerts for the same device (seconds). Default: `21600`. |
+| `ALERT_COOLDOWN_SECONDS` | Minimum time between repeat alerts for newly discovered unknown devices (seconds). Default: `21600` (6 hours). |
+| `NOTIFY_DEVICE_DISCONNECTED` | When `true`, dispatch alerts when an observed device goes offline. Default: `false` (disabled). Overridable in **Notifications**. |
+| `NOTIFY_DEVICE_RECONNECTED` | When `true`, dispatch alerts when an offline device reconnects. Default: `false` (disabled). Overridable in **Notifications**. |
+| `NOTIFY_DEVICE_SSID_CHANGED` | When `true`, dispatch alerts when an active device roams to a different Wi-Fi SSID. Default: `false` (disabled). Overridable in **Notifications**. |
+| `NOTIFY_DEVICE_AP_CHANGED` | When `true`, dispatch alerts when an active device roams to a different Access Point. Default: `false` (disabled). Overridable in **Notifications**. |
+| `NOTIFY_DEVICE_NETWORK_CHANGED` | When `true`, dispatch alerts when an active device's IP address or subnet changes. Default: `false` (disabled). Overridable in **Notifications**. |
+| `BEHAVIORAL_ALERT_COOLDOWN_SECONDS` | Minimum seconds between repeat behavioral alerts for the same device and event type. Default: `3600` (1 hour). Overridable in **Notifications**. |
 | `OBSERVATION_RETENTION_DAYS` | Delete observations older than this many days. Default: `30`. Use `0` to disable. Overridable in **Tools**. |
 | `EVENT_RETENTION_DAYS` | Delete events (and related notification deliveries) older than this many days. Default: `90`. Use `0` to disable. Overridable in **Tools**. |
 | `UNIFI_DRY_RUN_BLOCKS` | When `true`, log block actions without sending them to the controller. |
@@ -194,6 +200,33 @@ NetWatcher tracks real-time network connectivity independently of administrative
   * State transitions generate audit-logged behavioral events atomically within the scan transaction:
     * `device_disconnected`: Logged when an online device satisfies the offline threshold, recording duration online, consecutive missed scans, and offline transition timestamp.
     * `device_reconnected`: Logged when an offline device is observed active again, recording previous offline duration.
+* **Roaming & Network Change Tracking**:
+  * Active online devices are monitored for environmental and network transitions:
+    * `device_ap_changed`: Recorded when a wireless client roams to a different Access Point (AP MAC). Transient missing AP metadata in controller responses is ignored to prevent flapping. Returning to a previously associated AP generates a clean roam event.
+    * `device_ssid_changed`: Recorded when a wireless client connects to a different Wi-Fi SSID.
+    * `device_network_changed`: Recorded when a client's IP address or subnet changes.
+  * Roaming and network changes are tracked without resetting connectivity state or advancing missed-scan counters.
+  * Baseline safety: Initial device discovery records initial network properties without firing spurious roaming or network change events.
+* **Configurable Behavioral Notification Rules**:
+  * Granular alert rules for device state changes and network events:
+    * **Disconnections** (`NOTIFY_DEVICE_DISCONNECTED`): Alerts when a monitored device drops offline, including duration online.
+    * **Reconnections** (`NOTIFY_DEVICE_RECONNECTED`): Alerts when an offline device reconnects, including previous offline duration.
+    * **SSID Roaming** (`NOTIFY_DEVICE_SSID_CHANGED`): Alerts when a device switches Wi-Fi networks.
+    * **AP Roaming** (`NOTIFY_DEVICE_AP_CHANGED`): Alerts when a device roams between access points.
+    * **Network Changes** (`NOTIFY_DEVICE_NETWORK_CHANGED`): Alerts when a device receives a new IP address.
+  * **Strict Opt-In**: All behavioral notifications are disabled by default (`false`) to prevent alert fatigue.
+  * **Independent Per-Event Cooldown**: Each event type maintains an isolated cooldown per device (`BEHAVIORAL_ALERT_COOLDOWN_SECONDS`, default: `3600` seconds / 1 hour). A disconnection notification will never suppress a subsequent reconnection alert.
+  * **Human-Friendly Formatting**: Notifications feature formatted uptime/downtime durations (e.g. `2 hours 15 minutes` or `45 seconds`) alongside device identification details (hostname, IP, MAC).
+  * **Non-Blocking Dispatch**: Alert intents are queued during scanning and dispatched strictly after the database transaction commits, ensuring external notification latency never delays scan cycles.
+  * **Runtime Configuration**: Rules and cooldown settings can be toggled and saved dynamically via the **Notifications** tab in the Web UI.
+* **Connection History & Timeline UI**:
+  * The device detail page (`/devices/{id}`) includes an interactive **Connection Timeline**:
+    * Chronological list of transition events (disconnections, reconnections, AP roaming, SSID changes, IP changes, and discovery).
+    * High-contrast visual badges and icons distinguish connection states and network shifts.
+    * Contextual duration badges display active uptime or downtime spans between transitions.
+    * HTMX-powered pagination ("Load more events") loads history in chunks without full page reloads.
+    * Backed by an indexed SQLite query (`ix_events_device_id_created_at`) for high-performance retrieval on low-resource hardware.
+    * Strict HTML escaping ensures all untrusted network, SSID, and device metadata is rendered safely against XSS attacks.
 * **Outage & Empty-Scan Resilience**:
   * **Outage Immunity**: Controller communication failures, timeouts, or authentication errors abort the scan and freeze connectivity states and missed-scan counters. NetWatcher never falsely declares devices offline due to a controller outage.
   * **Empty Sites**: A valid, successful scan reporting zero connected clients is treated as an authoritative snapshot and correctly increments missed-scan counters toward offline confirmation.
@@ -202,7 +235,7 @@ NetWatcher tracks real-time network connectivity independently of administrative
   * The first time an `unknown` device is seen online, its state transitions quietly to `online` without firing a spurious `device_reconnected` event.
   * Devices that remain absent while `unknown` stay in `unknown` state without incrementing missed-scan counters.
 * **Web UI Inspection**:
-  * The device detail view displays the device's current connectivity state, last connected timestamp, and last disconnected timestamp under Core Information.
+  * The device detail view displays the device's current connectivity state, last connected timestamp, and last disconnected timestamp under Core Information, with the chronological transition history visualized directly below in the Connection Timeline.
 
 ## Releases
 

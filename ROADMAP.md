@@ -133,16 +133,17 @@ Every phase and pull request must strictly adhere to these architectural constra
   - Lightweight HTML/Tailwind timeline component in the device detail view rendering recent state transitions and connection history.
 
 #### Implementation Pull Requests
-- **PR 1**: `feat(devices): add independent connectivity state and transition events` (Decoupled connectivity model, persistent timestamps, multi-scan and grace period thresholds, behavioral events, baseline initialization, outage immunity, device detail view — Complete, Pending Review).
-- **PR 2**: `feat(notifications): add configurable behavioral notification rules` (Granular notification rules, opt-in toggles, per-device cooldown windows).
-- **PR 3**: `feat(devices): add lightweight connection history and timeline UI` (Device timeline component, state transitions, roaming history).
+- **PR 1**: `feat(devices): add independent connectivity state and transition events` ([PR #61](https://github.com/andrewtryder/unifi-netwatcher/pull/61) — Merged).
+- **PR 2**: `feat(notifications): add configurable behavioral notification rules` (Granular notification rules, opt-in toggles, independent per-event cooldowns, settings UI).
+- **PR 3**: `feat(devices): track roaming and network changes` (SSID, AP roaming, and IP address transitions with flapping protection).
+- **PR 4**: `feat(devices): add connection history and timeline UI` (Device timeline component, bounded queries, duration badges, and HTMX pagination).
 
 #### Acceptance Criteria
 - [x] Devices retain their trust status regardless of connectivity changes.
 - [x] Controller outages do not trigger false offline alerts or state changes.
-- [ ] Roaming between access points does not cause false disconnection/reconnection cycles.
-- [ ] All behavioral alerts are disabled by default and require explicit user opt-in.
-- [ ] Timeline renders efficiently on SQLite without external charting libraries.
+- [x] Roaming between access points does not cause false disconnection/reconnection cycles.
+- [x] All behavioral alerts are disabled by default and require explicit user opt-in.
+- [x] Timeline renders efficiently on SQLite without external charting libraries.
 
 ---
 
