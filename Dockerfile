@@ -22,7 +22,8 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 FROM python:3.14-slim-bookworm
 WORKDIR /app
 
-RUN groupadd --gid 10001 app \
+RUN rm -rf /usr/local/lib/python3.14/site-packages/* /usr/local/bin/pip* \
+    && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid app --shell /usr/sbin/nologin --create-home app \
     && mkdir -p /app/data /app/logs /tmp \
     && chown -R app:app /app /tmp

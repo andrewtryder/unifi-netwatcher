@@ -31,6 +31,38 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
+      - name: Checkout release PR branch
+        if: ${{ steps.release.outputs.prs_created == 'true' || steps.release.outputs.pr != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: release-please--branches--main
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Install uv
+        if: ${{ steps.release.outputs.prs_created == 'true' || steps.release.outputs.pr != '' }}
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          enable-cache: false
+
+      - name: Synchronize uv.lock on release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' || steps.release.outputs.pr != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          uv lock
+          if ! git diff --quiet uv.lock; then
+            echo "Synchronizing uv.lock on release-please--branches--main..."
+            git add uv.lock
+            git commit -m "chore: synchronize uv.lock for release"
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:release-please--branches--main
+          else
+            echo "uv.lock is already synchronized."
+          fi
+
   publish-image:
     name: publish-image
     needs: [release-please]
