@@ -29,11 +29,12 @@ class OfficialUniFiAdapter(UniFiAdapter):
     """Adapter for modern UniFi Network Integration API (v1) using X-API-KEY authentication."""
 
     adapter_name = "official"
+    max_pages: int = 1000
     capabilities = UniFiCapabilities(
         can_block=False,
         can_unblock=False,
-        has_wifi_telemetry=True,
-        has_switch_port=True,
+        has_wifi_telemetry=False,
+        has_switch_port=False,
         supports_pagination=True,
     )
 
@@ -53,7 +54,10 @@ class OfficialUniFiAdapter(UniFiAdapter):
         self.mock_mode = settings.UNIFI_MOCK_MODE
 
     def close(self) -> None:
-        if self._owns_client and self.client is not None and not self.client.is_closed:
+        if self._owns_client and self.client is not None:
+            is_closed = getattr(self.client, "is_closed", False)
+            if isinstance(is_closed, bool) and is_closed:
+                return
             self.client.close()
 
     def _get_headers(self) -> dict[str, str]:
@@ -98,75 +102,163 @@ class OfficialUniFiAdapter(UniFiAdapter):
         for candidate in self._candidate_base_paths():
             candidate_base = f"{self.base_url}{candidate}"
             sites_url = f"{candidate_base}/sites"
+            all_sites: list[dict[str, Any]] = []
+            site_offset = 0
+            site_limit = 100
+            max_site_pages = min(self.max_pages, 100)
+            candidate_not_found = False
+
             try:
-                r = self.client.get(sites_url, headers=headers)
-                if r.status_code == 401:
-                    raise UniFiAuthError(
-                        "UniFi official API key invalid or unauthorized (HTTP 401)."
-                    )
-                if r.status_code == 403:
-                    raise UniFiPermissionError(
-                        "UniFi official API key lacks required permissions (HTTP 403)."
-                    )
-                if r.status_code == 404:
-                    # Endpoint path not found at this candidate; try next candidate
-                    continue
-                r.raise_for_status()
+                for _ in range(max_site_pages):
+                    params = {"offset": site_offset, "limit": site_limit}
+                    r = self.client.get(sites_url, headers=headers, params=params)
+                    if r.status_code == 401:
+                        raise UniFiAuthError(
+                            "UniFi official API key invalid or unauthorized (HTTP 401)."
+                        )
+                    if r.status_code == 403:
+                        raise UniFiPermissionError(
+                            "UniFi official API key lacks required permissions (HTTP 403)."
+                        )
+                    if r.status_code == 404:
+                        candidate_not_found = True
+                        break
+                    r.raise_for_status()
 
-                try:
-                    payload = r.json()
-                except Exception as exc:
-                    raise UniFiResponseError(
-                        f"Malformed JSON from UniFi sites endpoint: {exc}"
-                    ) from exc
-
-                if not isinstance(payload, dict) or "data" not in payload:
-                    raise UniFiResponseError(
-                        "Unexpected response format from UniFi sites endpoint (missing 'data')"
-                    )
-
-                sites = payload["data"]
-                if not isinstance(sites, list):
-                    raise UniFiResponseError("UniFi sites response 'data' field is not a list")
-
-                for s in sites:
-                    if not isinstance(s, dict):
+                    try:
+                        payload = r.json()
+                    except Exception as exc:
                         raise UniFiResponseError(
-                            f"Malformed site record in UniFi sites response: expected dict, got {type(s).__name__}"
+                            f"Malformed JSON from UniFi sites endpoint: {exc}"
+                        ) from exc
+
+                    if not isinstance(payload, dict) or "data" not in payload:
+                        raise UniFiResponseError(
+                            "Unexpected response format from UniFi sites endpoint (missing 'data')"
                         )
 
-                # Match configured UNIFI_SITE
-                configured = self.site.strip()
-                matching_sites: list[dict[str, Any]] = []
-                for site_obj in sites:
-                    site_id = str(site_obj.get("id", ""))
-                    site_name = str(site_obj.get("name", ""))
-                    internal_ref = str(site_obj.get("internalReference", ""))
+                    sites_page = payload["data"]
+                    if not isinstance(sites_page, list):
+                        raise UniFiResponseError("UniFi sites response 'data' field is not a list")
+
+                    for s in sites_page:
+                        if not isinstance(s, dict):
+                            raise UniFiResponseError(
+                                f"Malformed site record in UniFi sites response: expected dict, got {type(s).__name__}"
+                            )
+                        all_sites.append(s)
+
+                    resp_offset = as_int(payload.get("offset"))
+                    if resp_offset is not None and resp_offset != site_offset:
+                        raise UniFiResponseError(
+                            f"Inconsistent sites pagination offset: requested {site_offset}, got {resp_offset}"
+                        )
+
+                    resp_limit = as_int(payload.get("limit")) or site_limit
+                    if resp_limit <= 0:
+                        raise UniFiResponseError(f"Invalid sites pagination limit: {resp_limit}")
+
+                    total_count = as_int(payload.get("totalCount"))
+                    if total_count is not None and total_count < 0:
+                        raise UniFiResponseError(
+                            f"Invalid negative totalCount in sites pagination: {total_count}"
+                        )
+
+                    if not sites_page:
+                        if total_count is not None and site_offset < total_count:
+                            raise UniFiResponseError(
+                                f"Premature empty page in sites pagination: offset {site_offset} < totalCount {total_count}"
+                            )
+                        break
 
                     if (
-                        internal_ref == configured
-                        or site_name.lower() == configured.lower()
-                        or site_id == configured
+                        total_count is not None
+                        and len(sites_page) < resp_limit
+                        and (site_offset + len(sites_page)) < total_count
                     ):
-                        matching_sites.append(site_obj)
+                        raise UniFiResponseError(
+                            f"Incomplete sites pagination response: received {len(sites_page)} items with limit {resp_limit}, "
+                            f"but offset {site_offset + len(sites_page)} is less than totalCount {total_count}"
+                        )
 
-                if len(matching_sites) > 1:
-                    matched_ids = [s.get("id") for s in matching_sites]
+                    site_offset += len(sites_page)
+
+                    if total_count is not None:
+                        if site_offset == total_count:
+                            break
+                        if site_offset > total_count:
+                            raise UniFiResponseError(
+                                f"Sites pagination overflow: received {site_offset} items, exceeding totalCount {total_count}"
+                            )
+                    elif len(sites_page) < resp_limit:
+                        break
+                else:
                     raise UniFiResponseError(
-                        f"Ambiguous UniFi site match for '{configured}': multiple sites matched {matched_ids}"
+                        f"Maximum sites pagination pages ({max_site_pages}) exceeded while querying UniFi sites."
                     )
 
+                if candidate_not_found:
+                    continue
+
+                # Match configured UNIFI_SITE using exact-match precedence
+                configured = self.site.strip()
                 matched_id: str | None = None
-                if len(matching_sites) == 1:
-                    matched_id = str(matching_sites[0].get("id", ""))
-                elif len(sites) == 1 and configured.lower() == "default":
-                    matched_id = str(sites[0].get("id", ""))
+
+                # Tier 1: Exact ID match (UUID)
+                tier1 = [s for s in all_sites if str(s.get("id", "")) == configured]
+                if len(tier1) == 1:
+                    matched_id = str(tier1[0].get("id", ""))
+                elif len(tier1) > 1:
+                    matched_ids = [s.get("id") for s in tier1]
+                    raise UniFiResponseError(
+                        f"Ambiguous UniFi site match for '{configured}': multiple sites matched by ID {matched_ids}"
+                    )
+
+                # Tier 2: Exact internalReference match (e.g. 'default')
+                if matched_id is None:
+                    tier2 = [
+                        s for s in all_sites if str(s.get("internalReference", "")) == configured
+                    ]
+                    if len(tier2) == 1:
+                        matched_id = str(tier2[0].get("id", ""))
+                    elif len(tier2) > 1:
+                        matched_ids = [s.get("id") for s in tier2]
+                        raise UniFiResponseError(
+                            f"Ambiguous UniFi site match for '{configured}': multiple sites matched by internalReference {matched_ids}"
+                        )
+
+                # Tier 3: Exact case-sensitive site name match
+                if matched_id is None:
+                    tier3 = [s for s in all_sites if str(s.get("name", "")) == configured]
+                    if len(tier3) == 1:
+                        matched_id = str(tier3[0].get("id", ""))
+                    elif len(tier3) > 1:
+                        matched_ids = [s.get("id") for s in tier3]
+                        raise UniFiResponseError(
+                            f"Ambiguous UniFi site match for '{configured}': multiple sites matched by name {matched_ids}"
+                        )
+
+                # Tier 4: Case-insensitive site name match
+                if matched_id is None:
+                    tier4 = [
+                        s for s in all_sites if str(s.get("name", "")).lower() == configured.lower()
+                    ]
+                    if len(tier4) == 1:
+                        matched_id = str(tier4[0].get("id", ""))
+                    elif len(tier4) > 1:
+                        matched_ids = [s.get("id") for s in tier4]
+                        raise UniFiResponseError(
+                            f"Ambiguous UniFi site match for '{configured}': multiple sites matched by case-insensitive name {matched_ids}"
+                        )
+
+                # Fallback: single site on console and configured is 'default'
+                if matched_id is None and len(all_sites) == 1 and configured.lower() == "default":
+                    matched_id = str(all_sites[0].get("id", ""))
 
                 if matched_id is None:
                     available = [
                         s.get("name") or s.get("internalReference") or s.get("id")
-                        for s in sites
-                        if isinstance(s, dict)
+                        for s in all_sites
                     ]
                     raise UniFiResponseError(
                         f"Configured UniFi site '{configured}' not found in official API sites: {available}"
@@ -221,10 +313,9 @@ class OfficialUniFiAdapter(UniFiAdapter):
         all_clients: list[UniFiClientDevice] = []
         offset = 0
         limit = 100
-        max_pages = 1000
+        max_pages = self.max_pages
 
         for _ in range(max_pages):
-            previous_offset = offset
             params = {"offset": offset, "limit": limit}
             try:
                 r = self.client.get(clients_url, headers=headers, params=params)
@@ -265,6 +356,26 @@ class OfficialUniFiAdapter(UniFiAdapter):
                         raise UniFiResponseError(
                             f"Malformed client record at index {idx}: expected dict, got {type(item).__name__}"
                         )
+
+                # Validate pagination metadata
+                resp_offset = as_int(payload.get("offset"))
+                if resp_offset is not None and resp_offset != offset:
+                    raise UniFiResponseError(
+                        f"Inconsistent pagination offset: requested {offset}, got {resp_offset}"
+                    )
+
+                resp_limit = as_int(payload.get("limit")) or limit
+                if resp_limit <= 0:
+                    raise UniFiResponseError(f"Invalid pagination limit: {resp_limit}")
+
+                total_count = as_int(payload.get("totalCount"))
+                if total_count is not None and total_count < 0:
+                    raise UniFiResponseError(
+                        f"Invalid negative totalCount in pagination: {total_count}"
+                    )
+
+                # Filter and normalize physical clients with valid MAC
+                for item in data:
                     raw_mac = item.get("macAddress") or item.get("mac")
                     if not raw_mac or not isinstance(raw_mac, str) or not raw_mac.strip():
                         logger.debug(
@@ -296,19 +407,34 @@ class OfficialUniFiAdapter(UniFiAdapter):
                     seen_macs.add(mac)
                     all_clients.append(UniFiClientDevice.from_official_dict(item, site_id=site_id))
 
-                # Pagination termination checks
-                total_count = as_int(payload.get("totalCount"))
-                resp_limit = as_int(payload.get("limit")) or limit
-
+                # Pagination completion validation based on raw response records and metadata
                 if not data:
+                    if total_count is not None and offset < total_count:
+                        raise UniFiResponseError(
+                            f"Premature empty page in pagination: offset {offset} < totalCount {total_count}"
+                        )
                     break
-                if total_count is not None and len(all_clients) >= total_count:
-                    break
-                if total_count is None and len(data) < resp_limit:
-                    break
+
+                if (
+                    total_count is not None
+                    and len(data) < resp_limit
+                    and (offset + len(data)) < total_count
+                ):
+                    raise UniFiResponseError(
+                        f"Incomplete pagination response: received {len(data)} items with limit {resp_limit}, "
+                        f"but offset {offset + len(data)} is less than totalCount {total_count}"
+                    )
 
                 offset += len(data)
-                if offset == previous_offset:
+
+                if total_count is not None:
+                    if offset == total_count:
+                        break
+                    if offset > total_count:
+                        raise UniFiResponseError(
+                            f"Pagination overflow: received {offset} raw items, exceeding totalCount {total_count}"
+                        )
+                elif len(data) < resp_limit:
                     break
 
             except UniFiError, UniFiAuthError, UniFiPermissionError, UniFiResponseError:
@@ -335,6 +461,10 @@ class OfficialUniFiAdapter(UniFiAdapter):
                 raise UniFiError(
                     f"Unexpected error communicating with UniFi official API: {e}"
                 ) from e
+        else:
+            raise UniFiResponseError(
+                f"Maximum pagination pages ({max_pages}) exceeded while querying UniFi clients."
+            )
 
         return all_clients
 
@@ -352,6 +482,27 @@ class OfficialUniFiAdapter(UniFiAdapter):
         )
         return False
 
+    def probe(self) -> None:
+        """Probe official API, validating connectivity, authentication, and permissions.
+
+        Raises:
+            UniFiAuthError: Invalid API key or unauthorized (401).
+            UniFiPermissionError: Insufficient permissions (403).
+            UniFiConnectionError: Host unreachable or connection failed.
+            UniFiTimeoutError: Request timed out.
+            UniFiResponseError: Malformed response or site resolution failed.
+            UniFiError: Generic UniFi adapter failure.
+        """
+        self._load_settings()
+        if self.mock_mode:
+            return
+        if not self.api_key.strip():
+            raise UniFiAuthError(
+                "UNIFI_API_KEY is not configured. Set UNIFI_API_KEY to use official API mode."
+            )
+        self._resolve_site()
+        self.get_clients()
+
     def test_connection(self) -> tuple[bool, str]:
         """Test connection and authentication to the official UniFi API."""
         self._load_settings()
@@ -362,11 +513,10 @@ class OfficialUniFiAdapter(UniFiAdapter):
             return False, "UNIFI_API_KEY is not configured"
 
         try:
-            site_id = self._resolve_site()
-            self.get_clients()
+            self.probe()
             return (
                 True,
-                f"Successfully connected to UniFi official API ({self.base_url}, site: {self.site} -> {site_id})",
+                f"Successfully connected to UniFi official API ({self.base_url}, site: {self.site} -> {self._resolved_site_id})",
             )
         except UniFiError as exc:
             return False, str(exc)

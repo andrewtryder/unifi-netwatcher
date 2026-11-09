@@ -27,17 +27,15 @@ def create_unifi_adapter(mode: str | None = None) -> UniFiAdapter:
             logger.info("UNIFI_API_MODE=auto: API key detected, probing official API...")
             adapter = OfficialUniFiAdapter()
             try:
-                success, msg = adapter.test_connection()
-                if success:
-                    logger.info("Official API probe successful; selected OfficialUniFiAdapter.")
-                    return adapter
-                logger.warning(
-                    f"Official API probe failed ({msg}); falling back to legacy adapter."
-                )
+                adapter.probe()
+                logger.info("Official API probe successful; selected OfficialUniFiAdapter.")
+                return adapter
             except UniFiAuthError, UniFiPermissionError:
+                adapter.close()
                 # Do not silently fall back on credential/permission errors
                 raise
             except Exception as e:
+                adapter.close()
                 logger.warning(
                     f"Official API probe encountered error ({e}); falling back to legacy adapter."
                 )

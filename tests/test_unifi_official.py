@@ -28,8 +28,8 @@ def test_official_adapter_capabilities():
     assert adapter.capabilities.can_block is False
     assert adapter.capabilities.can_unblock is False
     assert adapter.capabilities.supports_pagination is True
-    assert adapter.capabilities.has_wifi_telemetry is True
-    assert adapter.capabilities.has_switch_port is True
+    assert adapter.capabilities.has_wifi_telemetry is False
+    assert adapter.capabilities.has_switch_port is False
 
     # Blocking is not supported in official integration API
     assert adapter.block_client("00:11:22:33:44:55") is False
@@ -184,7 +184,7 @@ def test_official_adapter_get_clients_pagination(monkeypatch):
     adapter._resolved_site_id = "site-test"
     adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
 
-    # Simulate 2 pages of results:
+    # Simulate 2 pages of results with page size limit=2:
     # Page 1: returns 2 items, totalCount=3
     page1 = {
         "data": [
@@ -192,6 +192,8 @@ def test_official_adapter_get_clients_pagination(monkeypatch):
             {"macAddress": "00:00:00:00:00:02", "name": "Device 2"},
         ],
         "totalCount": 3,
+        "limit": 2,
+        "offset": 0,
     }
     # Page 2: returns 1 item, totalCount=3
     page2 = {
@@ -199,6 +201,8 @@ def test_official_adapter_get_clients_pagination(monkeypatch):
             {"macAddress": "00:00:00:00:00:03", "name": "Device 3"},
         ],
         "totalCount": 3,
+        "limit": 2,
+        "offset": 2,
     }
 
     mock_resp1 = MagicMock(status_code=200, json=lambda: page1)
@@ -433,3 +437,303 @@ def test_unifi_factory_mode_selection(monkeypatch):
     assert isinstance(adapter, OfficialUniFiAdapter)
 
     close_unifi_adapter()
+
+
+def test_factory_auto_mode_auth_error_not_swallowed(monkeypatch):
+    close_unifi_adapter()
+    monkeypatch.setattr(settings, "UNIFI_API_MODE", "auto")
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("invalid-key"))
+
+    mock_client = MagicMock()
+    # 401 Unauthorized during probe
+    mock_client.get.return_value = MagicMock(status_code=401)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: mock_client)
+
+    with pytest.raises(UniFiAuthError):
+        create_unifi_adapter()
+
+    # Discarded adapter must be closed
+    assert mock_client.close.called
+    close_unifi_adapter()
+
+
+def test_factory_auto_mode_permission_error_not_swallowed(monkeypatch):
+    close_unifi_adapter()
+    monkeypatch.setattr(settings, "UNIFI_API_MODE", "auto")
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("forbidden-key"))
+
+    mock_client = MagicMock()
+    # 403 Forbidden during probe
+    mock_client.get.return_value = MagicMock(status_code=403)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: mock_client)
+
+    with pytest.raises(UniFiPermissionError):
+        create_unifi_adapter()
+
+    assert mock_client.close.called
+    close_unifi_adapter()
+
+
+def test_factory_auto_mode_unsupported_api_falls_back_to_legacy(monkeypatch):
+    close_unifi_adapter()
+    monkeypatch.setattr(settings, "UNIFI_API_MODE", "auto")
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("some-key"))
+
+    mock_client = MagicMock()
+    # 404 Endpoint not found for candidate official paths
+    mock_client.get.return_value = MagicMock(status_code=404)
+    monkeypatch.setattr(httpx, "Client", lambda **kwargs: mock_client)
+
+    adapter = create_unifi_adapter()
+    assert isinstance(adapter, LegacyUniFiAdapter)
+    assert mock_client.close.called
+    close_unifi_adapter()
+
+
+def test_pagination_with_vpn_clients_and_duplicates(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # 2 pages with 2 raw records each (totalCount=4)
+    # Page 1: 1 physical LAN client + 1 VPN client without MAC
+    page1 = {
+        "data": [
+            {"id": "c-1", "macAddress": "00:11:22:33:44:55", "name": "LAN-1"},
+            {"id": "c-vpn", "type": "VPN", "name": "Teleport-1", "macAddress": None},
+        ],
+        "totalCount": 4,
+        "limit": 2,
+        "offset": 0,
+    }
+    # Page 2: 1 duplicate MAC of LAN-1 + 1 new physical client
+    page2 = {
+        "data": [
+            {"id": "c-1-dup", "macAddress": "00:11:22:33:44:55", "name": "LAN-1-Dup"},
+            {"id": "c-2", "macAddress": "00:11:22:33:44:66", "name": "LAN-2"},
+        ],
+        "totalCount": 4,
+        "limit": 2,
+        "offset": 2,
+    }
+
+    mock_http.get.side_effect = [
+        MagicMock(status_code=200, json=lambda: page1),
+        MagicMock(status_code=200, json=lambda: page2),
+    ]
+
+    clients = adapter.get_clients()
+    # Exactly 2 unique physical clients returned
+    assert len(clients) == 2
+    assert [c.mac for c in clients] == ["00:11:22:33:44:55", "00:11:22:33:44:66"]
+    # Pagination completed cleanly after 2 pages
+    assert mock_http.get.call_count == 2
+
+
+def test_pagination_premature_empty_page_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Server claims totalCount=10, but returns empty page at offset 0
+    empty_premature = {
+        "data": [],
+        "totalCount": 10,
+        "offset": 0,
+        "limit": 10,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: empty_premature)
+
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "Premature empty page" in str(excinfo.value)
+
+
+def test_pagination_inconsistent_offset_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Server returns wrong offset (99 instead of 0)
+    bad_offset = {
+        "data": [{"macAddress": "00:11:22:33:44:55"}],
+        "totalCount": 1,
+        "offset": 99,
+        "limit": 10,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: bad_offset)
+
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "Inconsistent pagination offset" in str(excinfo.value)
+
+
+def test_pagination_truncated_page_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Server returns 1 item with limit 10, but totalCount is 5 (truncated)
+    truncated = {
+        "data": [{"macAddress": "00:11:22:33:44:55"}],
+        "totalCount": 5,
+        "offset": 0,
+        "limit": 10,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: truncated)
+
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "Incomplete pagination response" in str(excinfo.value)
+
+
+def test_pagination_overflow_rejected(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Server claims totalCount=1, but returns 2 items
+    overflow = {
+        "data": [
+            {"macAddress": "00:11:22:33:44:55"},
+            {"macAddress": "00:11:22:33:44:66"},
+        ],
+        "totalCount": 1,
+        "offset": 0,
+        "limit": 10,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: overflow)
+
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "Pagination overflow" in str(excinfo.value)
+
+
+def test_pagination_max_pages_exhausted(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Infinite loop simulation: server never terminates, returning 1 item per page without totalCount
+    def endless_response(*args, **kwargs):
+        params = kwargs.get("params", {})
+        off = params.get("offset", 0)
+        return MagicMock(
+            status_code=200,
+            json=lambda: {
+                "data": [{"macAddress": f"00:00:00:00:00:{off:02x}"}],
+                "offset": off,
+                "limit": 1,
+            },
+        )
+
+    mock_http.get.side_effect = endless_response
+
+    adapter.max_pages = 3
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "Maximum pagination pages" in str(excinfo.value)
+    assert mock_http.get.call_count == 3
+
+
+def test_resolve_site_pagination(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    monkeypatch.setattr(settings, "UNIFI_SITE", "target-site")
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+
+    # 2 pages of sites:
+    page1 = {
+        "data": [
+            {"id": "site-1", "name": "Branch Office", "internalReference": "branch"},
+        ],
+        "totalCount": 2,
+        "limit": 1,
+        "offset": 0,
+    }
+    page2 = {
+        "data": [
+            {"id": "site-2", "name": "Target Site", "internalReference": "target-site"},
+        ],
+        "totalCount": 2,
+        "limit": 1,
+        "offset": 1,
+    }
+
+    mock_http.get.side_effect = [
+        MagicMock(status_code=200, json=lambda: page1),
+        MagicMock(status_code=200, json=lambda: page2),
+    ]
+
+    site_id = adapter._resolve_site()
+    assert site_id == "site-2"
+    assert mock_http.get.call_count == 2
+
+
+def test_resolve_site_exact_match_precedence(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+
+    # Multi-site console:
+    # Site 1: id="uuid-1", name="default", internalReference="branch"
+    # Site 2: id="uuid-2", name="Branch Office", internalReference="default"
+    # Site 3: id="default", name="Tertiary", internalReference="tertiary"
+    sites_payload = {
+        "data": [
+            {"id": "uuid-1", "name": "default", "internalReference": "branch"},
+            {"id": "uuid-2", "name": "Branch Office", "internalReference": "default"},
+            {"id": "default", "name": "Tertiary", "internalReference": "tertiary"},
+        ],
+        "totalCount": 3,
+        "limit": 10,
+        "offset": 0,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: sites_payload)
+
+    # 1. Configured = "default" -> Tier 1 (ID == "default") takes priority!
+    monkeypatch.setattr(settings, "UNIFI_SITE", "default")
+    adapter._resolved_site_id = None
+    adapter._api_base_path = None
+    assert adapter._resolve_site() == "default"
+
+    # 2. Configured = "branch" -> Tier 2 (internalReference == "branch") takes priority over Tier 3/4
+    monkeypatch.setattr(settings, "UNIFI_SITE", "branch")
+    adapter._resolved_site_id = None
+    adapter._api_base_path = None
+    assert adapter._resolve_site() == "uuid-1"
+
+    # 3. Configured = "Branch Office" -> Tier 3 (exact name) matches uuid-2
+    monkeypatch.setattr(settings, "UNIFI_SITE", "Branch Office")
+    adapter._resolved_site_id = None
+    adapter._api_base_path = None
+    assert adapter._resolve_site() == "uuid-2"
+
+    # 4. Configured = "branch office" (lowercase) -> Tier 4 matches uuid-2
+    monkeypatch.setattr(settings, "UNIFI_SITE", "branch office")
+    adapter._resolved_site_id = None
+    adapter._api_base_path = None
+    assert adapter._resolve_site() == "uuid-2"
