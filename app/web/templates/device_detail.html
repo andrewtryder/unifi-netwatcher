@@ -82,7 +82,7 @@
 
                 {% if timeline_events %}
                 <div class="flex flex-col relative before:absolute before:inset-y-0 before:left-4 before:w-0.5 before:bg-outline/60" id="timeline-events-container">
-                    {% with events=timeline_events, next_offset=next_timeline_offset %}
+                    {% with events=timeline_events, next_cursor_created_at=next_timeline_cursor_created_at, next_cursor_id=next_timeline_cursor_id, next_offset=next_timeline_offset %}
                     {% include "partials/device_timeline_items.html" %}
                     {% endwith %}
                 </div>

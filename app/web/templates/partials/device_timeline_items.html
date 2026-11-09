@@ -102,7 +102,17 @@
 </div>
 {% endfor %}
 
-{% if next_offset %}
+{% if next_cursor_created_at and next_cursor_id %}
+<div id="timeline-load-more" class="pt-2 text-center">
+    <button hx-get="/htmx/devices/{{ device.id }}/timeline?cursor_created_at={{ next_cursor_created_at }}&cursor_id={{ next_cursor_id }}"
+            hx-target="#timeline-load-more"
+            hx-swap="outerHTML"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors py-1.5 px-3 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10">
+        <span class="material-symbols-outlined text-sm">expand_more</span>
+        Load more activity
+    </button>
+</div>
+{% elif next_offset %}
 <div id="timeline-load-more" class="pt-2 text-center">
     <button hx-get="/htmx/devices/{{ device.id }}/timeline?offset={{ next_offset }}"
             hx-target="#timeline-load-more"

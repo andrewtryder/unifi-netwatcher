@@ -142,15 +142,96 @@ def test_timeline_bounded_limit_and_pagination():
     # Event #14 (which is item 31) should not be on first page
     assert "Roamed transition #14" not in resp.text
     assert "Load more activity" in resp.text
-    assert 'offset=30"' in resp.text
+    assert "cursor_created_at=" in resp.text
+    assert "cursor_id=" in resp.text
 
-    # 2. HTMX call to fetch offset=30 gets remaining 15 events
-    resp_page2 = client.get(f"/htmx/devices/{dev.id}/timeline?offset=30&limit=30", headers=AUTH)
+    # 2. HTMX call using keyset cursor parameters fetches remaining 15 events
+    last_item = events[15]  # Item #15 is the 30th item (events are 44..15 on page 1)
+    cursor_time = last_item.created_at.isoformat()
+    cursor_id = last_item.id
+
+    resp_page2 = client.get(
+        f"/htmx/devices/{dev.id}/timeline?cursor_created_at={cursor_time}&cursor_id={cursor_id}&limit=30",
+        headers=AUTH,
+    )
     assert resp_page2.status_code == 200
     assert "Roamed transition #14" in resp_page2.text
     assert "Roamed transition #0" in resp_page2.text
     # Last page: no further "Load more" button
     assert "Load more activity" not in resp_page2.text
+
+    # 3. Fallback offset-based query also works
+    resp_offset = client.get(f"/htmx/devices/{dev.id}/timeline?offset=30&limit=30", headers=AUTH)
+    assert resp_offset.status_code == 200
+    assert "Roamed transition #14" in resp_offset.text
+    assert "Roamed transition #0" in resp_offset.text
+
+    db.close()
+
+
+def test_timeline_keyset_pagination_immune_to_insert_shifts():
+    """Keyset pagination remains stable when new events are inserted while paginating."""
+    db = TestingSessionLocal()
+    t0 = datetime(2026, 11, 9, 8, 0, 0, tzinfo=UTC)
+
+    dev = Device(
+        mac="55:55:55:55:55:55", hostname="concurrent-dev", status=DeviceStatus.TRUSTED.value
+    )
+    db.add(dev)
+    db.flush()
+
+    # Initial batch: 10 events (e0 .. e9)
+    initial_events = [
+        Event(
+            device_id=dev.id,
+            event_type="device_ap_changed",
+            message=f"Initial event #{i}",
+            created_at=t0 + timedelta(minutes=i),
+        )
+        for i in range(10)
+    ]
+    db.add_all(initial_events)
+    db.commit()
+
+    client = TestClient(app)
+
+    # Fetch page 1 with limit=5 (returns events #9, #8, #7, #6, #5)
+    resp_p1 = client.get(f"/htmx/devices/{dev.id}/timeline?limit=5", headers=AUTH)
+    assert resp_p1.status_code == 200
+    assert "Initial event #9" in resp_p1.text
+    assert "Initial event #5" in resp_p1.text
+    assert "Initial event #4" not in resp_p1.text
+
+    # Extract cursor for item #5
+    cursor_event = initial_events[5]
+    cursor_time = cursor_event.created_at.isoformat()
+    cursor_id = cursor_event.id
+
+    # NOW: 3 brand new events arrive at the top (created later)
+    new_events = [
+        Event(
+            device_id=dev.id,
+            event_type="device_ap_changed",
+            message=f"Brand new event #{j}",
+            created_at=t0 + timedelta(hours=1, minutes=j),
+        )
+        for j in range(3)
+    ]
+    db.add_all(new_events)
+    db.commit()
+
+    # If we used offset=5, page 2 would return shifted items (including #7, #6, #5 duplicates!).
+    # But with keyset cursor (created_at < cursor_time OR (created_at == cursor_time AND id < cursor_id)):
+    resp_p2 = client.get(
+        f"/htmx/devices/{dev.id}/timeline?cursor_created_at={cursor_time}&cursor_id={cursor_id}&limit=5",
+        headers=AUTH,
+    )
+    assert resp_p2.status_code == 200
+    # Must seamlessly return #4 down to #0 without duplicates or skipping!
+    assert "Initial event #4" in resp_p2.text
+    assert "Initial event #0" in resp_p2.text
+    assert "Initial event #5" not in resp_p2.text
+    assert "Brand new event" not in resp_p2.text
 
     db.close()
 
