@@ -248,10 +248,14 @@ def test_official_adapter_error_handling(monkeypatch):
     with pytest.raises(UniFiPermissionError):
         adapter.get_clients()
 
-    # 404 Endpoint not found
+    # 404 Endpoint not found (invalidates cached site ID)
     mock_http.get.return_value = MagicMock(status_code=404)
     with pytest.raises(UniFiResponseError):
         adapter.get_clients()
+
+    # Restore cached site ID for subsequent client endpoint tests
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
 
     # Connection error
     mock_http.get.side_effect = httpx.ConnectError("Connection refused")
@@ -274,12 +278,108 @@ def test_official_adapter_error_handling(monkeypatch):
     with pytest.raises(UniFiResponseError):
         adapter.get_clients()
 
-    # Missing MAC address in record
+    # Non-dict item in "data" array raises UniFiResponseError
     mock_http.get.return_value = MagicMock(
-        status_code=200, json=lambda: {"data": [{"name": "bad-client"}]}
+        status_code=200, json=lambda: {"data": ["invalid_string_entry"]}
     )
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter.get_clients()
+    assert "expected dict" in str(excinfo.value)
+
+
+def test_official_adapter_skips_non_mac_clients(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "site-test"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Mixed inventory: 1 physical LAN client, 1 Teleport/VPN client without MAC, 1 duplicate MAC
+    mixed_data = {
+        "data": [
+            {
+                "id": "c-lan-1",
+                "macAddress": "00:11:22:33:44:55",
+                "ipAddress": "192.168.1.50",
+                "name": "LAN-PC",
+                "type": "WIRED",
+            },
+            {
+                "id": "c-vpn-1",
+                "ipAddress": "10.8.0.2",
+                "name": "Remote-User",
+                "type": "VPN",
+                "macAddress": None,
+            },
+            {
+                "id": "c-lan-dup",
+                "macAddress": "00:11:22:33:44:55",
+                "ipAddress": "192.168.1.50",
+                "name": "Duplicate-Record",
+            },
+        ],
+        "totalCount": 3,
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: mixed_data)
+    clients = adapter.get_clients()
+
+    # The VPN client was safely skipped without error, duplicate was deduplicated
+    assert len(clients) == 1
+    assert clients[0].mac == "00:11:22:33:44:55"
+    assert clients[0].name == "LAN-PC"
+
+
+def test_official_adapter_ambiguous_site_error(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    monkeypatch.setattr(settings, "UNIFI_SITE", "default")
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+
+    # Two sites both matching 'default'
+    ambiguous_sites = {
+        "data": [
+            {"id": "site-1", "name": "Default", "internalReference": "default"},
+            {"id": "site-2", "name": "Default", "internalReference": "default"},
+        ]
+    }
+    mock_http.get.return_value = MagicMock(status_code=200, json=lambda: ambiguous_sites)
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter._resolve_site()
+    assert "Ambiguous UniFi site match" in str(excinfo.value)
+
+
+def test_official_adapter_resolve_site_malformed_records(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+
+    # Malformed site list: item is not a dict
+    mock_http.get.return_value = MagicMock(
+        status_code=200, json=lambda: {"data": ["not-a-dict-site-record"]}
+    )
+    with pytest.raises(UniFiResponseError) as excinfo:
+        adapter._resolve_site()
+    assert "Malformed site record" in str(excinfo.value)
+
+
+def test_official_adapter_stale_site_invalidation_on_404(monkeypatch):
+    monkeypatch.setattr(settings, "UNIFI_MOCK_MODE", False)
+    monkeypatch.setattr(settings, "UNIFI_API_KEY", SecretStr("test-api-key"))
+    mock_http = MagicMock()
+    adapter = OfficialUniFiAdapter(shared_http=mock_http)
+    adapter._resolved_site_id = "stale-site-id"
+    adapter._api_base_path = "https://unifi.example.local/proxy/network/integration/v1"
+
+    # Controller returns 404 (stale site ID)
+    mock_http.get.return_value = MagicMock(status_code=404)
     with pytest.raises(UniFiResponseError):
         adapter.get_clients()
+
+    # Verify site ID cache was invalidated
+    assert adapter._resolved_site_id is None
 
 
 def test_official_adapter_test_connection(monkeypatch):

@@ -94,8 +94,8 @@ Every phase and pull request must strictly adhere to these architectural constra
 - **Scan Reliability**: Scanner correctly differentiates between a successful scan with zero connected clients (`scan_finished`, `success=True`) and controller/network failures (`scan_failed`, `success=False`).
 
 #### Implementation Pull Requests
-- **PR 1**: `refactor(unifi): introduce adapter interface and scan reliability` (Models, base adapter, legacy adapter refactor, scan reliability fix, tests).
-- **PR 2**: `feat(unifi): support official network API and API key authentication` (Official adapter, pagination, site resolution, API mode setting).
+- **PR 1**: `refactor(unifi): introduce adapter interface and scan reliability` ([PR #58](https://github.com/andrewtryder/unifi-netwatcher/pull/58) — Merged).
+- **PR 2**: `feat(unifi): support official network API and API key authentication` ([PR #59](https://github.com/andrewtryder/unifi-netwatcher/pull/59) — Complete, Pending Review).
 - **PR 3**: `feat(unifi): expose adapter capabilities and connection status in UI` (Status badges, connection test, documentation).
 
 #### Acceptance Criteria

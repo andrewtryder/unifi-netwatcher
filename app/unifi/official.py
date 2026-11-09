@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.mac import normalize_mac
 from app.unifi.base import UniFiAdapter
 from app.unifi.models import (
     UniFiAuthError,
@@ -128,12 +129,16 @@ class OfficialUniFiAdapter(UniFiAdapter):
                 if not isinstance(sites, list):
                     raise UniFiResponseError("UniFi sites response 'data' field is not a list")
 
+                for s in sites:
+                    if not isinstance(s, dict):
+                        raise UniFiResponseError(
+                            f"Malformed site record in UniFi sites response: expected dict, got {type(s).__name__}"
+                        )
+
                 # Match configured UNIFI_SITE
-                matched_id: str | None = None
                 configured = self.site.strip()
+                matching_sites: list[dict[str, Any]] = []
                 for site_obj in sites:
-                    if not isinstance(site_obj, dict):
-                        continue
                     site_id = str(site_obj.get("id", ""))
                     site_name = str(site_obj.get("name", ""))
                     internal_ref = str(site_obj.get("internalReference", ""))
@@ -143,10 +148,18 @@ class OfficialUniFiAdapter(UniFiAdapter):
                         or site_name.lower() == configured.lower()
                         or site_id == configured
                     ):
-                        matched_id = site_id
-                        break
+                        matching_sites.append(site_obj)
 
-                if matched_id is None and len(sites) == 1 and configured.lower() == "default":
+                if len(matching_sites) > 1:
+                    matched_ids = [s.get("id") for s in matching_sites]
+                    raise UniFiResponseError(
+                        f"Ambiguous UniFi site match for '{configured}': multiple sites matched {matched_ids}"
+                    )
+
+                matched_id: str | None = None
+                if len(matching_sites) == 1:
+                    matched_id = str(matching_sites[0].get("id", ""))
+                elif len(sites) == 1 and configured.lower() == "default":
                     matched_id = str(sites[0].get("id", ""))
 
                 if matched_id is None:
@@ -204,11 +217,14 @@ class OfficialUniFiAdapter(UniFiAdapter):
 
         clients_url = f"{base_path}/sites/{site_id}/clients"
         headers = self._get_headers()
+        seen_macs: set[str] = set()
         all_clients: list[UniFiClientDevice] = []
         offset = 0
         limit = 100
+        max_pages = 1000
 
-        while True:
+        for _ in range(max_pages):
+            previous_offset = offset
             params = {"offset": offset, "limit": limit}
             try:
                 r = self.client.get(clients_url, headers=headers, params=params)
@@ -219,6 +235,7 @@ class OfficialUniFiAdapter(UniFiAdapter):
                         "UniFi official API key lacks required permissions (HTTP 403)."
                     )
                 if r.status_code == 404:
+                    self._resolved_site_id = None
                     raise UniFiResponseError("UniFi clients endpoint not found (HTTP 404).")
                 r.raise_for_status()
 
@@ -248,11 +265,32 @@ class OfficialUniFiAdapter(UniFiAdapter):
                         raise UniFiResponseError(
                             f"Malformed client record at index {idx}: expected dict, got {type(item).__name__}"
                         )
-                    mac = item.get("macAddress") or item.get("mac")
-                    if not mac or not isinstance(mac, str) or not mac.strip():
-                        raise UniFiResponseError(
-                            f"Malformed client record at index {idx}: missing or invalid MAC address"
+                    raw_mac = item.get("macAddress") or item.get("mac")
+                    if not raw_mac or not isinstance(raw_mac, str) or not raw_mac.strip():
+                        logger.debug(
+                            "Skipping client %s (type=%s, name=%s): no MAC address provided",
+                            item.get("id"),
+                            item.get("type"),
+                            item.get("name"),
                         )
+                        continue
+
+                    mac = normalize_mac(raw_mac)
+                    if not mac:
+                        logger.debug(
+                            "Skipping client %s (type=%s, name=%s): invalid MAC address %r",
+                            item.get("id"),
+                            item.get("type"),
+                            item.get("name"),
+                            raw_mac,
+                        )
+                        continue
+
+                    if mac in seen_macs:
+                        logger.debug("Skipping duplicate client MAC %s on site %s", mac, site_id)
+                        continue
+
+                    seen_macs.add(mac)
                     all_clients.append(UniFiClientDevice.from_official_dict(item, site_id=site_id))
 
                 # Pagination termination checks
@@ -267,6 +305,8 @@ class OfficialUniFiAdapter(UniFiAdapter):
                     break
 
                 offset += len(data)
+                if offset == previous_offset:
+                    break
 
             except UniFiError, UniFiAuthError, UniFiPermissionError, UniFiResponseError:
                 raise

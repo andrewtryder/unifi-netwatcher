@@ -131,7 +131,10 @@ class UniFiClientDevice(Mapping[str, Any]):
         cls, data: dict[str, Any], site_id: str | None = None
     ) -> UniFiClientDevice:
         """Create a normalized UniFiClientDevice from an official UniFi API client dict."""
-        mac = str(data.get("macAddress") or data.get("mac") or "").strip()
+        from app.mac import normalize_mac
+
+        raw_mac = str(data.get("macAddress") or data.get("mac") or "").strip()
+        mac = normalize_mac(raw_mac) or raw_mac
         ip = data.get("ipAddress") or data.get("ip")
         name = data.get("name")
         hostname = data.get("hostname") or name
