@@ -240,3 +240,15 @@ def format_connection_state_label(state: str | None) -> str:
         "unknown": "Idle (No Scans Yet)",
     }
     return mapping.get(str(state).lower(), str(state).title())
+
+
+def format_connectivity_state_label(state: str | None) -> str:
+    """Format device connectivity state into human-readable label."""
+    if not state:
+        return "Unknown"
+    mapping = {
+        "online": "Online",
+        "offline": "Offline",
+        "unknown": "Unknown",
+    }
+    return mapping.get(str(state).lower(), str(state).title())

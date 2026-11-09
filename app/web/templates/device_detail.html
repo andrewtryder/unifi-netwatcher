@@ -45,6 +45,29 @@
                         <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Vendor</span>
                         <span class="text-lg">{{ device.vendor or 'N/A' }}</span>
                     </div>
+                    <div class="flex flex-col gap-1 md:col-span-2">
+                        <span class="text-xs font-medium text-on-surface-variant uppercase tracking-wider font-mono">Connectivity State</span>
+                        <div class="flex items-center gap-2 mt-0.5">
+                            {% if device.connectivity_state == 'online' %}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-secondary/10 text-secondary border border-secondary/20">
+                                <span class="w-1.5 h-1.5 rounded-full bg-secondary"></span> Online
+                            </span>
+                            {% elif device.connectivity_state == 'offline' %}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">
+                                <span class="w-1.5 h-1.5 rounded-full bg-outline"></span> Offline
+                            </span>
+                            {% else %}
+                            <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-surface-variant text-on-surface-variant border border-outline">
+                                <span class="w-1.5 h-1.5 rounded-full bg-warning"></span> Unknown Baseline
+                            </span>
+                            {% endif %}
+                            {% if device.last_connected_at and device.connectivity_state == 'online' %}
+                            <span class="text-xs text-on-surface-variant font-mono">(connected {{ device.last_connected_at.strftime('%Y-%m-%d %H:%M') }})</span>
+                            {% elif device.last_disconnected_at and device.connectivity_state == 'offline' %}
+                            <span class="text-xs text-on-surface-variant font-mono">(disconnected {{ device.last_disconnected_at.strftime('%Y-%m-%d %H:%M') }})</span>
+                            {% endif %}
+                        </div>
+                    </div>
                 </div>
             </div>
 

@@ -1,5 +1,6 @@
 import logging
 import threading
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -9,6 +10,7 @@ from app.config import settings
 from app.db import utcnow
 from app.mac import normalize_mac
 from app.models import (
+    ConnectivityState,
     Device,
     Event,
     NotificationChannel,
@@ -18,6 +20,7 @@ from app.models import (
 )
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
+from app.services.connectivity import ConnectivityService, resolve_offline_thresholds
 from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
 from app.unifi.status import sanitize_unifi_error
@@ -250,131 +253,209 @@ def _run_scan_locked(db: Session, source: str) -> dict:
 
     now = utcnow()
 
-    if not clients_data:
-        message = "Scan completed: 0 active clients on UniFi site"
-        logger.info(message)
-        scan_finish_event = Event(event_type="scan_finished", severity="info", message=message)
-        db.add(scan_finish_event)
+    # Finding 1: Ensure inventory response is a valid list of mapping entries.
+    # None or non-list or malformed items must produce scan_failed without advancing missed-scans.
+    if clients_data is None or not isinstance(clients_data, list):
+        item_type = type(clients_data).__name__ if clients_data is not None else "None"
+        message = f"Invalid inventory response from UniFi: expected list, got {item_type}"
+        logger.error(message)
+        scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
+        db.add(scan_fail_event)
         db.commit()
-        return {"success": True, "message": message, "devices_processed": 0}
+        return {"success": False, "message": message, "devices_processed": 0}
 
-    # Normalize MACs and prepare batch lookups
-    prepared: list[tuple[str, dict]] = []
-    macs: list[str] = []
-    prefixes: set[str] = set()
     for c in clients_data:
-        mac = normalize_mac(c.get("mac"))
-        if not mac:
-            continue
-        prepared.append((mac, c))
-        macs.append(mac)
-        prefix = _mac_prefix(mac)
-        if prefix:
-            prefixes.add(prefix)
+        if not isinstance(c, Mapping):
+            message = f"Invalid inventory response from UniFi: malformed device entry ({type(c).__name__})"
+            logger.error(message)
+            scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
+            db.add(scan_fail_event)
+            db.commit()
+            return {"success": False, "message": message, "devices_processed": 0}
 
-    devices_by_mac = _batch_load_devices(db, macs)
-    oui_by_prefix = _batch_load_oui_vendors(db, prefixes)
+    # Finding 2: Explicit transaction boundary around reconciliation.
+    # Any failure during reconciliation rolls back partial changes and logs scan_failed on a best-effort basis.
+    alert_intents: list[AlertIntent] = []
+    try:
+        # Normalize MACs and prepare batch lookups
+        prepared: list[tuple[str, dict]] = []
+        macs: list[str] = []
+        prefixes: set[str] = set()
+        for c in clients_data:
+            mac = normalize_mac(c.get("mac"))
+            if not mac:
+                continue
+            prepared.append((mac, c))
+            macs.append(mac)
+            prefix = _mac_prefix(mac)
+            if prefix:
+                prefixes.add(prefix)
 
-    # First pass: upsert devices/observations; collect unknown device ids for cooldown
-    unknown_candidates: list[Device] = []
-    for mac, c in prepared:
-        ip = c.get("ip")
-        hostname = c.get("hostname")
+        devices_by_mac = _batch_load_devices(db, macs)
+        oui_by_prefix = _batch_load_oui_vendors(db, prefixes)
 
-        vendor = None
-        prefix = _mac_prefix(mac)
-        if prefix and prefix in oui_by_prefix:
-            vendor = oui_by_prefix[prefix]
-        if not vendor:
-            vendor = c.get("oui")
-
-        site = c.get("site_id")
-        ssid = c.get("essid")
-        ap_mac = normalize_mac(c.get("ap_mac", ""))
-        telemetry = _client_telemetry(c)
-
-        device = devices_by_mac.get(mac)
-        is_new = False
-        if not device:
-            is_new = True
-            device = Device(
-                mac=mac,
-                hostname=hostname,
-                ip=ip,
-                vendor=vendor,
-                status="unknown",
-                first_seen_at=now,
-                last_seen_at=now,
-                last_site=site,
-                last_ssid=ssid,
-                last_ap_mac=ap_mac,
-                **{k: v for k, v in telemetry.items() if v is not None},
-            )
-            db.add(device)
-            db.flush()
-            devices_by_mac[mac] = device
-        else:
-            device.last_seen_at = now
-            if hostname:
-                device.hostname = hostname
-            if ip:
-                device.ip = ip
-            if vendor:
-                device.vendor = vendor
-            if site:
-                device.last_site = site
-            if ssid:
-                device.last_ssid = ssid
-            if ap_mac:
-                device.last_ap_mac = ap_mac
-            _apply_telemetry(device, telemetry)
-
-        db.add(
-            Observation(
-                device_id=device.id,
-                mac=mac,
-                ip=ip,
-                hostname=hostname,
-                site=site,
-                ssid=ssid,
-                ap_mac=ap_mac,
-                raw_json=c.raw_data if hasattr(c, "raw_data") else c,
-                seen_at=now,
-            )
+        # Instantiate connectivity service with resolved thresholds
+        missed_threshold, grace_threshold = resolve_offline_thresholds(db)
+        connectivity = ConnectivityService(
+            missed_scans_threshold=missed_threshold,
+            grace_seconds=grace_threshold,
         )
 
-        if is_new:
+        # First pass: upsert devices/observations; apply connectivity updates for observed clients
+        unknown_candidates: list[Device] = []
+        for mac, c in prepared:
+            ip = c.get("ip")
+            hostname = c.get("hostname")
+
+            vendor = None
+            prefix = _mac_prefix(mac)
+            if prefix and prefix in oui_by_prefix:
+                vendor = oui_by_prefix[prefix]
+            if not vendor:
+                vendor = c.get("oui")
+
+            site = c.get("site_id")
+            ssid = c.get("essid")
+            ap_mac = normalize_mac(c.get("ap_mac", ""))
+            telemetry = _client_telemetry(c)
+
+            device = devices_by_mac.get(mac)
+            is_new = False
+            if not device:
+                is_new = True
+                device = Device(
+                    mac=mac,
+                    hostname=hostname,
+                    ip=ip,
+                    vendor=vendor,
+                    status="unknown",
+                    first_seen_at=now,
+                    last_seen_at=now,
+                    last_site=site,
+                    last_ssid=ssid,
+                    last_ap_mac=ap_mac,
+                    **{k: v for k, v in telemetry.items() if v is not None},
+                )
+                connectivity.handle_discovered_device(device, now)
+                db.add(device)
+                db.flush()
+                devices_by_mac[mac] = device
+            else:
+                device.last_seen_at = now
+                if hostname:
+                    device.hostname = hostname
+                if ip:
+                    device.ip = ip
+                if vendor:
+                    device.vendor = vendor
+                if site:
+                    device.last_site = site
+                if ssid:
+                    device.last_ssid = ssid
+                if ap_mac:
+                    device.last_ap_mac = ap_mac
+                _apply_telemetry(device, telemetry)
+
+                transition = connectivity.handle_observed_device(device, now)
+                if transition and transition.event_type:
+                    db.add(
+                        Event(
+                            device_id=device.id,
+                            event_type=transition.event_type,
+                            severity="info",
+                            message=transition.event_message,
+                            metadata_json=transition.event_metadata,
+                            created_at=now,
+                        )
+                    )
+
             db.add(
-                Event(
+                Observation(
                     device_id=device.id,
-                    event_type="discovered",
-                    severity="info",
-                    message=f"New device discovered: {mac}",
+                    mac=mac,
+                    ip=ip,
+                    hostname=hostname,
+                    site=site,
+                    ssid=ssid,
+                    ap_mac=ap_mac,
+                    raw_json=c.raw_data if hasattr(c, "raw_data") else c,
+                    seen_at=now,
                 )
             )
 
-        if device.status == "unknown":
-            unknown_candidates.append(device)
+            if is_new:
+                db.add(
+                    Event(
+                        device_id=device.id,
+                        event_type="discovered",
+                        severity="info",
+                        message=f"New device discovered: {mac}",
+                    )
+                )
 
-    cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
-    alert_intents: list[AlertIntent] = []
-    for device in unknown_candidates:
-        if device.id in cooldown_ids:
-            logger.debug("Device %s is in alert cooldown.", device.mac)
-            continue
-        alert_intents.append(
-            AlertIntent(
-                device_id=device.id,
-                mac=device.mac,
-                message=_alert_message(device),
-            )
+            if device.status == "unknown":
+                unknown_candidates.append(device)
+
+        # Finding 4: Evaluate only online absent devices for offline transitions.
+        # Historical offline/unknown devices do not change state and do not need missed-scan increments.
+        observed_mac_set = set(macs)
+        absent_query = db.query(Device).filter(
+            Device.connectivity_state == ConnectivityState.ONLINE.value
         )
-        # Prevent duplicate intents for the same device within one scan
-        cooldown_ids.add(device.id)
+        if observed_mac_set:
+            absent_query = absent_query.filter(Device.mac.notin_(observed_mac_set))
+        absent_devices = absent_query.all()
 
-    message = f"Scan finished ({source}). Processed {len(clients_data)} clients."
-    db.add(Event(event_type="scan_finished", severity="info", message=message))
-    db.commit()
+        for device in absent_devices:
+            transition = connectivity.handle_absent_device(device, now)
+            if transition and transition.event_type:
+                db.add(
+                    Event(
+                        device_id=device.id,
+                        event_type=transition.event_type,
+                        severity="info",
+                        message=transition.event_message,
+                        metadata_json=transition.event_metadata,
+                        created_at=now,
+                    )
+                )
+
+        cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
+        for device in unknown_candidates:
+            if device.id in cooldown_ids:
+                logger.debug("Device %s is in alert cooldown.", device.mac)
+                continue
+            alert_intents.append(
+                AlertIntent(
+                    device_id=device.id,
+                    mac=device.mac,
+                    message=_alert_message(device),
+                )
+            )
+            # Prevent duplicate intents for the same device within one scan
+            cooldown_ids.add(device.id)
+
+        if not clients_data:
+            message = f"Scan completed: 0 active clients on UniFi site ({source})"
+        else:
+            message = f"Scan finished ({source}). Processed {len(clients_data)} clients."
+
+        db.add(Event(event_type="scan_finished", severity="info", message=message))
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        clean_msg = sanitize_unifi_error(str(exc))
+        message = f"Scan failed during reconciliation: {clean_msg}"
+        logger.exception(message)
+        try:
+            scan_fail_event = Event(event_type="scan_failed", severity="error", message=message)
+            db.add(scan_fail_event)
+            db.commit()
+        except Exception:
+            logger.exception("Failed to record scan_failed event after reconciliation error")
+            db.rollback()
+        return {"success": False, "message": message, "devices_processed": 0}
+
     logger.info("Scan finished successfully")
 
     # HTTP notifications outside the scan write window

@@ -26,6 +26,12 @@ class DeviceStatus(StrEnum):
     BLOCKED = "blocked"
 
 
+class ConnectivityState(StrEnum):
+    UNKNOWN = "unknown"
+    ONLINE = "online"
+    OFFLINE = "offline"
+
+
 class EventSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
@@ -41,9 +47,14 @@ class Device(Base):
     __tablename__ = "devices"
     __table_args__ = (
         Index("ix_devices_status_last_seen_at", "status", "last_seen_at"),
+        Index("ix_devices_connectivity_state", "connectivity_state"),
         CheckConstraint(
             "status IN ('unknown','trusted','ignored','blocked')",
             name="ck_devices_status",
+        ),
+        CheckConstraint(
+            "connectivity_state IN ('unknown','online','offline')",
+            name="ck_devices_connectivity_state",
         ),
     )
 
@@ -54,6 +65,19 @@ class Device(Base):
     ip: Mapped[str | None] = mapped_column(String, nullable=True)
     vendor: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[str] = mapped_column(String, default=DeviceStatus.UNKNOWN.value, nullable=False)
+    connectivity_state: Mapped[str] = mapped_column(
+        String, default=ConnectivityState.UNKNOWN.value, nullable=False
+    )
+    last_connected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_disconnected_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    consecutive_missed_scans: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    offline_candidate_since: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_site: Mapped[str | None] = mapped_column(String, nullable=True)

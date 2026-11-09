@@ -96,7 +96,7 @@ Every phase and pull request must strictly adhere to these architectural constra
 #### Implementation Pull Requests
 - **PR 1**: `refactor(unifi): introduce adapter interface and scan reliability` ([PR #58](https://github.com/andrewtryder/unifi-netwatcher/pull/58) — Merged).
 - **PR 2**: `feat(unifi): support official network API and API key authentication` ([PR #59](https://github.com/andrewtryder/unifi-netwatcher/pull/59) — Merged).
-- **PR 3**: `feat(unifi): expose adapter capabilities and connection status in UI` (Connection & capabilities dashboard panel, isolated connection test, server/UI capability enforcement, sanitized diagnostics — Complete, Pending Review).
+- **PR 3**: `feat(unifi): expose adapter capabilities and connection status in UI` ([PR #60](https://github.com/andrewtryder/unifi-netwatcher/pull/60) — Merged).
 
 #### Acceptance Criteria
 - [x] Existing legacy installations operate with zero configuration changes.
@@ -118,23 +118,28 @@ Every phase and pull request must strictly adhere to these architectural constra
 #### Architecture Components
 - **Decoupled Connectivity Model**:
   - `approval_status`: `unknown`, `trusted`, `ignored`, `blocked`.
-  - `connectivity_state`: `online`, `offline`.
-  - Timestamp tracking: `last_connected_at`, `last_disconnected_at`.
+  - `connectivity_state`: `unknown`, `online`, `offline`.
+  - Timestamp tracking: `last_connected_at`, `last_disconnected_at`, `consecutive_missed_scans`, `offline_candidate_since`.
 - **Behavioral Event Engine**:
   - Standardized events: `device_discovered`, `device_connected`, `device_disconnected`, `device_reconnected`, `device_ssid_changed`, `device_ap_changed`, `device_network_changed`.
 - **Safeguards & Flapping Suppression**:
-  - Configurable offline grace period (device must be absent for $N$ consecutive successful scans before being marked offline).
-  - Outage immunity: Controller scan failures or timeouts freeze connectivity state.
-  - Baseline initialization: Application restarts or initial scans establish a baseline without firing spurious reconnection events.
+  - Configurable offline grace period: device must miss $\ge N$ consecutive scans (`DEVICE_OFFLINE_MISSED_SCANS`) and satisfy grace duration (`DEVICE_OFFLINE_GRACE_SECONDS`) before transitioning to offline.
+  - Outage immunity: Controller scan failures or timeouts freeze connectivity state and counters.
+  - Baseline initialization: Pre-existing or newly imported devices establish an initial baseline without firing spurious reconnection events.
 - **Granular Notification Rules**:
   - Independent toggles for each behavioral event type.
   - Alert deduplication and per-device cooldown windows.
 - **Device Timeline**:
   - Lightweight HTML/Tailwind timeline component in the device detail view rendering recent state transitions and connection history.
 
+#### Implementation Pull Requests
+- **PR 1**: `feat(devices): add independent connectivity state and transition events` (Decoupled connectivity model, persistent timestamps, multi-scan and grace period thresholds, behavioral events, baseline initialization, outage immunity, device detail view — Complete, Pending Review).
+- **PR 2**: `feat(notifications): add configurable behavioral notification rules` (Granular notification rules, opt-in toggles, per-device cooldown windows).
+- **PR 3**: `feat(devices): add lightweight connection history and timeline UI` (Device timeline component, state transitions, roaming history).
+
 #### Acceptance Criteria
-- [ ] Devices retain their trust status regardless of connectivity changes.
-- [ ] Controller outages do not trigger false offline alerts.
+- [x] Devices retain their trust status regardless of connectivity changes.
+- [x] Controller outages do not trigger false offline alerts or state changes.
 - [ ] Roaming between access points does not cause false disconnection/reconnection cycles.
 - [ ] All behavioral alerts are disabled by default and require explicit user opt-in.
 - [ ] Timeline renders efficiently on SQLite without external charting libraries.

@@ -9,6 +9,7 @@ from app.web.display import (
     device_icon,
     format_adapter_name,
     format_connection_state_label,
+    format_connectivity_state_label,
     format_mode_name,
     satisfaction_color_class,
 )
@@ -29,6 +30,7 @@ templates.env.globals.update(
         "format_adapter_name": format_adapter_name,
         "format_mode_name": format_mode_name,
         "format_connection_state_label": format_connection_state_label,
+        "format_connectivity_state_label": format_connectivity_state_label,
     }
 )
 # Disable Jinja bytecode cache only in development (template hot-reload).

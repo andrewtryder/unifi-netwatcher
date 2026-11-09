@@ -1,8 +1,7 @@
 name: Lint PR
 
 on:
-  # Title-only validation; does not checkout or execute untrusted PR code.
-  pull_request_target: # zizmor: ignore[dangerous-triggers]
+  pull_request:
     types:
       - opened
       - edited
@@ -15,6 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  contents: read
   pull-requests: read # Inspect PR metadata for Conventional Commit title validation
 
 jobs:

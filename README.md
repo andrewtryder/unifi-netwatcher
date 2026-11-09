@@ -115,6 +115,8 @@ Copy `.env.example` (production / Docker) or `.env.development.example` (native 
 | `UNIFI_CA_BUNDLE` | Optional path to a CA certificate/bundle used when `UNIFI_VERIFY_SSL=true` (for self-signed UniFi controllers). Mount the file into the container and set this path. |
 | `UNIFI_TIMEOUT_SECONDS` | HTTP timeout when calling the UniFi API. |
 | `SCAN_INTERVAL_SECONDS` | How often to poll the controller for clients (seconds). Default: `300`. Overridable in **Tools**. |
+| `DEVICE_OFFLINE_MISSED_SCANS` | Consecutive missed scans required before marking an observed device offline. Default: `2` (minimum `2`). |
+| `DEVICE_OFFLINE_GRACE_SECONDS` | Minimum seconds a device must remain absent before transitioning to offline. Default: `600` (10 minutes). |
 | `ALERT_COOLDOWN_SECONDS` | Minimum time between repeat alerts for the same device (seconds). Default: `21600`. |
 | `OBSERVATION_RETENTION_DAYS` | Delete observations older than this many days. Default: `30`. Use `0` to disable. Overridable in **Tools**. |
 | `EVENT_RETENTION_DAYS` | Delete events (and related notification deliveries) older than this many days. Default: `90`. Use `0` to disable. Overridable in **Tools**. |
@@ -175,6 +177,32 @@ NetWatcher features a **UniFi Connection & Scanner** diagnostics panel on the da
   * `/healthz`: Application process is running and responding to HTTP requests.
   * `/readyz`: Database connection and schema migrations are healthy. Controller disconnection does not fail readiness checks or trigger container restarts.
   * `/api/unifi/status`: Authenticated endpoint returning full UniFi integration and connection diagnostic metadata.
+
+### Device Connectivity & Behavioral Events
+
+NetWatcher tracks real-time network connectivity independently of administrative approval status:
+
+* **Orthogonal State Machine**:
+  * **Approval Status** (`unknown`, `trusted`, `ignored`, `blocked`): Represents administrative authorization.
+  * **Connectivity State** (`online`, `offline`, `unknown`): Represents physical presence on the network. Trusting, ignoring, or blocking a device never alters its connectivity state, and disconnecting or reconnecting never alters its approval status.
+* **Flapping & Noise Suppression**:
+  * To avoid false alarms caused by momentary Wi-Fi roaming or sleep states, devices are not marked offline after a single missed scan.
+  * An observed device transitions to `offline` only when **both** criteria are satisfied:
+    1. It has missed at least `DEVICE_OFFLINE_MISSED_SCANS` consecutive scans (default: `2`).
+    2. At least `DEVICE_OFFLINE_GRACE_SECONDS` have elapsed since the device was first observed missing (default: `600` seconds / 10 minutes).
+* **Behavioral Event Generation**:
+  * State transitions generate audit-logged behavioral events atomically within the scan transaction:
+    * `device_disconnected`: Logged when an online device satisfies the offline threshold, recording duration online, consecutive missed scans, and offline transition timestamp.
+    * `device_reconnected`: Logged when an offline device is observed active again, recording previous offline duration.
+* **Outage & Empty-Scan Resilience**:
+  * **Outage Immunity**: Controller communication failures, timeouts, or authentication errors abort the scan and freeze connectivity states and missed-scan counters. NetWatcher never falsely declares devices offline due to a controller outage.
+  * **Empty Sites**: A valid, successful scan reporting zero connected clients is treated as an authoritative snapshot and correctly increments missed-scan counters toward offline confirmation.
+* **Baseline Initialization**:
+  * Pre-existing or newly imported devices initialize with `connectivity_state="unknown"`.
+  * The first time an `unknown` device is seen online, its state transitions quietly to `online` without firing a spurious `device_reconnected` event.
+  * Devices that remain absent while `unknown` stay in `unknown` state without incrementing missed-scan counters.
+* **Web UI Inspection**:
+  * The device detail view displays the device's current connectivity state, last connected timestamp, and last disconnected timestamp under Core Information.
 
 ## Releases
 
