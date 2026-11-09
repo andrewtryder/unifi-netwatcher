@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.2...v0.4.0) (2026-11-09)
+
+
+### Features
+
+* **notifications:** add unified Apprise provider adapter ([#56](https://github.com/andrewtryder/unifi-netwatcher/issues/56)) ([c3fe9e8](https://github.com/andrewtryder/unifi-netwatcher/commit/c3fe9e8c9042354b743c6f29d8c4bff3e31f0ade))
+* **unifi:** expose adapter capabilities and connection status in UI ([#60](https://github.com/andrewtryder/unifi-netwatcher/issues/60)) ([d2f927e](https://github.com/andrewtryder/unifi-netwatcher/commit/d2f927e109013b387a9dfb399861d9245f9e7644))
+* **unifi:** support official network integration API and API key authentication ([#59](https://github.com/andrewtryder/unifi-netwatcher/issues/59)) ([a5b658e](https://github.com/andrewtryder/unifi-netwatcher/commit/a5b658e56c89f548ac4dfc97f99ee346a2fcf845))
+
 ## [0.3.2](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.3.1...v0.3.2) (2026-09-20)
 
 
