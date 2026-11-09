@@ -122,7 +122,7 @@ Copy `.env.example` (production / Docker) or `.env.development.example` (native 
 | `NOTIFY_DEVICE_RECONNECTED` | When `true`, dispatch alerts when an offline device reconnects. Default: `false` (disabled). Overridable in **Notifications**. |
 | `NOTIFY_DEVICE_SSID_CHANGED` | When `true`, dispatch alerts when an active device roams to a different Wi-Fi SSID. Default: `false` (disabled). Overridable in **Notifications**. |
 | `NOTIFY_DEVICE_AP_CHANGED` | When `true`, dispatch alerts when an active device roams to a different Access Point. Default: `false` (disabled). Overridable in **Notifications**. |
-| `NOTIFY_DEVICE_NETWORK_CHANGED` | When `true`, dispatch alerts when an active device's IP address or subnet changes. Default: `false` (disabled). Overridable in **Notifications**. |
+| `NOTIFY_DEVICE_NETWORK_CHANGED` | When `true`, dispatch alerts when an active device's IP address changes. Default: `false` (disabled). Overridable in **Notifications**. |
 | `BEHAVIORAL_ALERT_COOLDOWN_SECONDS` | Minimum seconds between repeat behavioral alerts for the same device and event type. Default: `3600` (1 hour). Overridable in **Notifications**. |
 | `OBSERVATION_RETENTION_DAYS` | Delete observations older than this many days. Default: `30`. Use `0` to disable. Overridable in **Tools**. |
 | `EVENT_RETENTION_DAYS` | Delete events (and related notification deliveries) older than this many days. Default: `90`. Use `0` to disable. Overridable in **Tools**. |
@@ -204,7 +204,7 @@ NetWatcher tracks real-time network connectivity independently of administrative
   * Active online devices are monitored for environmental and network transitions:
     * `device_ap_changed`: Recorded when a wireless client roams to a different Access Point (AP MAC). Transient missing AP metadata in controller responses is ignored to prevent flapping. Returning to a previously associated AP generates a clean roam event.
     * `device_ssid_changed`: Recorded when a wireless client connects to a different Wi-Fi SSID.
-    * `device_network_changed`: Recorded when a client's IP address or subnet changes.
+    * `device_network_changed`: Recorded when a client's IP address changes.
   * Roaming and network changes are tracked without resetting connectivity state or advancing missed-scan counters.
   * Baseline safety: Initial device discovery records initial network properties without firing spurious roaming or network change events.
 * **Configurable Behavioral Notification Rules**:
@@ -216,8 +216,8 @@ NetWatcher tracks real-time network connectivity independently of administrative
     * **Network Changes** (`NOTIFY_DEVICE_NETWORK_CHANGED`): Alerts when a device receives a new IP address.
   * **Strict Opt-In**: All behavioral notifications are disabled by default (`false`) to prevent alert fatigue.
   * **Independent Per-Event Cooldown**: Each event type maintains an isolated cooldown per device (`BEHAVIORAL_ALERT_COOLDOWN_SECONDS`, default: `3600` seconds / 1 hour). A disconnection notification will never suppress a subsequent reconnection alert.
-  * **Human-Friendly Formatting**: Notifications feature formatted uptime/downtime durations (e.g. `2 hours 15 minutes` or `45 seconds`) alongside device identification details (hostname, IP, MAC).
-  * **Non-Blocking Dispatch**: Alert intents are queued during scanning and dispatched strictly after the database transaction commits, ensuring external notification latency never delays scan cycles.
+  * **Human-Friendly Formatting**: Notifications feature formatted uptime/downtime durations (e.g. `2h 15m` or `45s`) alongside device identification details (hostname, IP, MAC).
+  * **Post-Commit Dispatch**: Alert intents are queued during scanning, and notifications are delivered after the database commit using a bounded delivery budget; slow providers may extend a scanner job.
   * **Runtime Configuration**: Rules and cooldown settings can be toggled and saved dynamically via the **Notifications** tab in the Web UI.
 * **Connection History & Timeline UI**:
   * The device detail page (`/devices/{id}`) includes an interactive **Connection Timeline**:
