@@ -105,6 +105,8 @@ Copy `.env.example` (production / Docker) or `.env.development.example` (native 
 | `IMPORT_MAX_BYTES` | Max trusted-import upload size (bytes). Default `1000000`. |
 | `IMPORT_MAX_ROWS` | Max trusted-import data rows. Default `5000`. |
 | `DATABASE_URL` | SQLite database path. Default `sqlite:///./data/netwatcher.db` (Compose mounts data at `/app/data` via the `netwatcher-data` volume). |
+| `UNIFI_API_MODE` | API mode to communicate with UniFi: `legacy` (default, session cookies), `official` (REST Integration API v1 with API key), or `auto` (capability detection). |
+| `UNIFI_API_KEY` | Secret API token for official API mode. Leave empty when using `legacy` mode. |
 | `UNIFI_URL` | Base URL of your UniFi Network application (no trailing slash). |
 | `UNIFI_USERNAME` | UniFi account username. A dedicated account with only the permissions needed is recommended. |
 | `UNIFI_PASSWORD` | UniFi account password. |
@@ -120,6 +122,37 @@ Copy `.env.example` (production / Docker) or `.env.development.example` (native 
 | `UNIFI_MOCK_MODE` | When `true`, use fixture data instead of a real controller. For demo/development only. |
 | `WEBHOOK_ALLOWED_HOSTS` | Optional comma-separated hostnames allowed for outbound webhooks (SSRF allowlist bypass). |
 | `SECURITY_RECOVERY_BYPASS` | Emergency only: when `true`, bypass CIDR **and** trusted-host filtering (does not disable auth or reset passwords). Default `false`. |
+
+### UniFi API Modes
+
+NetWatcher supports both the classic session-cookie authenticated controller API and modern REST Integration API (v1).
+
+#### Legacy Mode (`UNIFI_API_MODE=legacy`, default)
+Uses session cookies (`/api/auth/login`) with username and password. This is the default mode, compatible with all UniFi Controller and Network Application versions.
+* **Capabilities**: Client inventory, Wi-Fi & switch port telemetry, client blocking (`block-sta` via `stamgr`).
+
+#### Official Mode (`UNIFI_API_MODE=official`)
+Uses the official Ubiquiti REST Integration API (v1) with `X-API-KEY` header authentication.
+* **Requirements**: UniFi OS console (UDM, UDM Pro, UCG, CloudKey Gen2+) running Network 8.0+ / UniFi OS 3.2+.
+* **Configuration**:
+  ```env
+  UNIFI_URL=https://192.168.1.1
+  UNIFI_SITE=default
+  UNIFI_API_MODE=official
+  UNIFI_API_KEY=your-api-key-here
+  UNIFI_VERIFY_SSL=true
+  ```
+* **Generating an API Key**:
+  1. Open your local UniFi OS console settings or visit [unifi.ui.com](https://unifi.ui.com).
+  2. Navigate to **Settings** ➔ **Integrations** (or **API Keys**).
+  3. Create a new API Key with Read permissions for Network Clients and Sites.
+* **Capabilities & Limitations**:
+  * Full pagination and automatic single-site resolution (maps `default` to your console's site UUID).
+  * Non-physical clients (such as active VPN or Teleport sessions without MAC addresses) are safely detected and skipped without interrupting LAN inventory polling.
+  * **Client Blocking**: Ubiquiti's official Integration API v1 does not support permanent MAC blocking for arbitrary LAN clients. Deployments requiring device blocking should remain on `legacy` mode.
+
+#### Auto Mode (`UNIFI_API_MODE=auto`)
+Conservative capability probe: selects `official` mode if `UNIFI_API_KEY` is present and verified; falls back to `legacy` mode if unconfigured. Never silently switches between adapters on authentication or permission errors.
 
 ## Releases
 

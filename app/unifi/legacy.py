@@ -52,7 +52,10 @@ class LegacyUniFiAdapter(UniFiAdapter):
         self.dry_run_blocks = settings.UNIFI_DRY_RUN_BLOCKS
 
     def close(self) -> None:
-        if self._owns_client and self.client is not None and not self.client.is_closed:
+        if self._owns_client and self.client is not None:
+            is_closed = getattr(self.client, "is_closed", False)
+            if isinstance(is_closed, bool) and is_closed:
+                return
             self.client.close()
 
     def _get_mock_data(self) -> list[dict[str, Any]]:
