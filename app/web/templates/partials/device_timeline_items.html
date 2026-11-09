@@ -1,0 +1,126 @@
+{% for event in events %}
+<div class="flex items-start gap-3.5 relative group">
+    <!-- Icon Node -->
+    {% if event.event_type == 'device_disconnected' %}
+    <div class="w-8 h-8 rounded-full bg-error/10 border-2 border-error flex items-center justify-center flex-shrink-0 z-10 text-error">
+        <span class="material-symbols-outlined text-base">cloud_off</span>
+    </div>
+    {% elif event.event_type in ('device_reconnected', 'device_connected') %}
+    <div class="w-8 h-8 rounded-full bg-secondary/10 border-2 border-secondary flex items-center justify-center flex-shrink-0 z-10 text-secondary">
+        <span class="material-symbols-outlined text-base">wifi</span>
+    </div>
+    {% elif event.event_type == 'device_ap_changed' %}
+    <div class="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center flex-shrink-0 z-10 text-primary">
+        <span class="material-symbols-outlined text-base">router</span>
+    </div>
+    {% elif event.event_type == 'device_ssid_changed' %}
+    <div class="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center flex-shrink-0 z-10 text-primary">
+        <span class="material-symbols-outlined text-base">cell_tower</span>
+    </div>
+    {% elif event.event_type == 'device_network_changed' %}
+    <div class="w-8 h-8 rounded-full bg-warning/10 border-2 border-warning flex items-center justify-center flex-shrink-0 z-10 text-warning">
+        <span class="material-symbols-outlined text-base">lan</span>
+    </div>
+    {% elif event.event_type == 'discovered' %}
+    <div class="w-8 h-8 rounded-full bg-primary/10 border-2 border-primary flex items-center justify-center flex-shrink-0 z-10 text-primary">
+        <span class="material-symbols-outlined text-base">new_releases</span>
+    </div>
+    {% else %}
+    <div class="w-8 h-8 rounded-full bg-surface-variant border-2 border-outline flex items-center justify-center flex-shrink-0 z-10 text-on-surface-variant">
+        <span class="material-symbols-outlined text-base">info</span>
+    </div>
+    {% endif %}
+
+    <!-- Event Content -->
+    <div class="flex flex-col gap-1.5 flex-1 min-w-0 pb-6">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+                {% if event.event_type == 'device_disconnected' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-error/10 text-error border border-error/20">Disconnected</span>
+                {% elif event.event_type == 'device_reconnected' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-secondary/10 text-secondary border border-secondary/20">Reconnected</span>
+                {% elif event.event_type == 'device_connected' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-secondary/10 text-secondary border border-secondary/20">Connected</span>
+                {% elif event.event_type == 'device_ap_changed' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-primary/10 text-primary border border-primary/20">AP Roamed</span>
+                {% elif event.event_type == 'device_ssid_changed' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-primary/10 text-primary border border-primary/20">SSID Changed</span>
+                {% elif event.event_type == 'device_network_changed' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-warning/10 text-warning border border-warning/20">IP Changed</span>
+                {% elif event.event_type == 'discovered' %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-primary/10 text-primary border border-primary/20">Discovered</span>
+                {% else %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-surface-variant text-on-surface-variant border border-outline">{{ event.event_type }}</span>
+                {% endif %}
+                <span class="font-mono text-xs text-on-surface-variant">{{ event.created_at.strftime('%Y-%m-%d %H:%M:%S UTC') }}</span>
+            </div>
+            <span class="text-xs text-on-surface-variant">{{ event.created_at|relative_ago(parens=True) }}</span>
+        </div>
+
+        <p class="text-sm text-on-surface break-words">{{ event.message or '' }}</p>
+
+        <!-- Metadata Pills -->
+        {% if event.metadata_json %}
+        <div class="flex flex-wrap items-center gap-2 pt-0.5">
+            {% if event.metadata_json.online_duration_seconds is defined and event.metadata_json.online_duration_seconds is not none %}
+            <span class="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded bg-surface-variant/40 text-on-surface-variant border border-outline/50">
+                <span class="material-symbols-outlined text-xs">timer</span>
+                Online: {{ event.metadata_json.online_duration_seconds|format_duration }}
+            </span>
+            {% endif %}
+
+            {% if event.metadata_json.offline_duration_seconds is defined and event.metadata_json.offline_duration_seconds is not none %}
+            <span class="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded bg-surface-variant/40 text-on-surface-variant border border-outline/50">
+                <span class="material-symbols-outlined text-xs">timer</span>
+                Offline: {{ event.metadata_json.offline_duration_seconds|format_duration }}
+            </span>
+            {% endif %}
+
+            {% if event.metadata_json.old_ap_mac and event.metadata_json.new_ap_mac %}
+            <span class="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded bg-surface-variant/40 text-on-surface-variant border border-outline/50">
+                <span class="material-symbols-outlined text-xs">router</span>
+                {{ event.metadata_json.old_ap_mac }} &rarr; {{ event.metadata_json.new_ap_mac }}
+            </span>
+            {% endif %}
+
+            {% if event.metadata_json.old_ssid and event.metadata_json.new_ssid %}
+            <span class="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded bg-surface-variant/40 text-on-surface-variant border border-outline/50">
+                <span class="material-symbols-outlined text-xs">cell_tower</span>
+                {{ event.metadata_json.old_ssid }} &rarr; {{ event.metadata_json.new_ssid }}
+            </span>
+            {% endif %}
+
+            {% if event.metadata_json.old_ip and event.metadata_json.new_ip %}
+            <span class="inline-flex items-center gap-1 font-mono text-xs px-2 py-0.5 rounded bg-surface-variant/40 text-on-surface-variant border border-outline/50">
+                <span class="material-symbols-outlined text-xs">lan</span>
+                {{ event.metadata_json.old_ip }} &rarr; {{ event.metadata_json.new_ip }}
+            </span>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endfor %}
+
+{% if next_cursor_created_at and next_cursor_id %}
+<div id="timeline-load-more" class="pt-2 text-center">
+    <button hx-get="/htmx/devices/{{ device.id }}/timeline?cursor_created_at={{ next_cursor_created_at }}&cursor_id={{ next_cursor_id }}"
+            hx-target="#timeline-load-more"
+            hx-swap="outerHTML"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors py-1.5 px-3 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10">
+        <span class="material-symbols-outlined text-sm">expand_more</span>
+        Load more activity
+    </button>
+</div>
+{% elif next_offset %}
+<div id="timeline-load-more" class="pt-2 text-center">
+    <button hx-get="/htmx/devices/{{ device.id }}/timeline?offset={{ next_offset }}"
+            hx-target="#timeline-load-more"
+            hx-swap="outerHTML"
+            class="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80 transition-colors py-1.5 px-3 rounded-lg border border-primary/20 bg-primary/5 hover:bg-primary/10">
+        <span class="material-symbols-outlined text-sm">expand_more</span>
+        Load more activity
+    </button>
+</div>
+{% endif %}
+

@@ -140,6 +140,7 @@ class Event(Base):
     __tablename__ = "events"
     __table_args__ = (
         Index("ix_events_device_id_event_type_created_at", "device_id", "event_type", "created_at"),
+        Index("ix_events_device_id_created_at", "device_id", "created_at"),
         Index("ix_events_event_type_created_at", "event_type", "created_at"),
         CheckConstraint(
             "severity IN ('info','warning','error')",

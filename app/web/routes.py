@@ -1,5 +1,8 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.db import get_db
@@ -98,6 +101,17 @@ def device_inventory(
     )
 
 
+TIMELINE_EVENT_TYPES = (
+    "discovered",
+    "device_connected",
+    "device_disconnected",
+    "device_reconnected",
+    "device_ssid_changed",
+    "device_ap_changed",
+    "device_network_changed",
+)
+
+
 @router.get("/devices/{device_id}", response_class=HTMLResponse)
 def device_detail(request: Request, device_id: int, db: Session = Depends(get_db)):
     device = db.query(Device).filter(Device.id == device_id).first()
@@ -110,10 +124,100 @@ def device_detail(request: Request, device_id: int, db: Session = Depends(get_db
         .limit(50)
         .all()
     )
+    timeline_events = (
+        db.query(Event)
+        .filter(
+            Event.device_id == device.id,
+            Event.event_type.in_(TIMELINE_EVENT_TYPES),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(31)
+        .all()
+    )
+    has_more_timeline = len(timeline_events) > 30
+    if has_more_timeline:
+        timeline_events = timeline_events[:30]
+        next_timeline_cursor_created_at = timeline_events[-1].created_at.isoformat()
+        next_timeline_cursor_id = timeline_events[-1].id
+        next_timeline_offset = 30
+    else:
+        next_timeline_cursor_created_at = None
+        next_timeline_cursor_id = None
+        next_timeline_offset = None
+
     return templates.TemplateResponse(
         request=request,
         name="device_detail.html",
-        context=template_context(db, request, device=device, observations=observations),
+        context=template_context(
+            db,
+            request,
+            device=device,
+            observations=observations,
+            timeline_events=timeline_events,
+            next_timeline_cursor_created_at=next_timeline_cursor_created_at,
+            next_timeline_cursor_id=next_timeline_cursor_id,
+            next_timeline_offset=next_timeline_offset,
+        ),
+    )
+
+
+@router.get("/htmx/devices/{device_id}/timeline", response_class=HTMLResponse)
+def htmx_device_timeline(
+    request: Request,
+    device_id: int,
+    cursor_created_at: datetime | None = Query(None),
+    cursor_id: int | None = Query(None),
+    offset: int = Query(0, ge=0),
+    limit: int = Query(30, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        return HTMLResponse("Not Found", status_code=404)
+
+    query = db.query(Event).filter(
+        Event.device_id == device.id,
+        Event.event_type.in_(TIMELINE_EVENT_TYPES),
+    )
+
+    if cursor_created_at is not None and cursor_id is not None:
+        query = query.filter(
+            or_(
+                Event.created_at < cursor_created_at,
+                and_(Event.created_at == cursor_created_at, Event.id < cursor_id),
+            )
+        )
+
+    query = query.order_by(Event.created_at.desc(), Event.id.desc())
+
+    if cursor_created_at is None and cursor_id is None and offset > 0:
+        query = query.offset(offset)
+
+    events = query.limit(limit + 1).all()
+
+    has_more = len(events) > limit
+    if has_more:
+        events = events[:limit]
+        next_cursor_created_at = events[-1].created_at.isoformat()
+        next_cursor_id = events[-1].id
+        next_offset = offset + limit
+    else:
+        next_cursor_created_at = None
+        next_cursor_id = None
+        next_offset = None
+
+    return templates.TemplateResponse(
+        request=request,
+        name="partials/device_timeline_items.html",
+        context=template_context(
+            db,
+            request,
+            device=device,
+            events=events,
+            next_cursor_created_at=next_cursor_created_at,
+            next_cursor_id=next_cursor_id,
+            next_offset=next_offset,
+        ),
     )
 
 
