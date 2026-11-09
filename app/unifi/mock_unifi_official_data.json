@@ -1,0 +1,72 @@
+{
+  "sites": {
+    "count": 1,
+    "limit": 25,
+    "offset": 0,
+    "totalCount": 1,
+    "data": [
+      {
+        "id": "mock-official-site-uuid-1",
+        "name": "Default",
+        "internalReference": "default"
+      }
+    ]
+  },
+  "clients": {
+    "count": 4,
+    "limit": 100,
+    "offset": 0,
+    "totalCount": 4,
+    "data": [
+      {
+        "id": "c-001",
+        "macAddress": "00:11:22:33:44:55",
+        "ipAddress": "192.168.1.10",
+        "name": "work-laptop",
+        "hostname": "work-laptop",
+        "type": "WIRELESS",
+        "access": {"type": "DEFAULT", "authorized": true},
+        "ssid": "SecureWiFi",
+        "accessPointMac": "aa:bb:cc:00:11:22",
+        "rssi": -55,
+        "txRateBps": 866000000,
+        "rxRateBps": 866000000
+      },
+      {
+        "id": "c-002",
+        "macAddress": "00:aa:bb:cc:dd:ee",
+        "ipAddress": "192.168.1.20",
+        "name": "office-desktop",
+        "hostname": "office-desktop",
+        "type": "WIRED",
+        "access": {"type": "DEFAULT", "authorized": true},
+        "switchPort": 3
+      },
+      {
+        "id": "c-003",
+        "macAddress": "66:77:88:99:aa:bb",
+        "ipAddress": "192.168.1.30",
+        "name": "guest-phone",
+        "hostname": "guest-phone",
+        "type": "WIRELESS",
+        "access": {"type": "GUEST", "authorized": false},
+        "ssid": "GuestWiFi",
+        "accessPointMac": "aa:bb:cc:00:11:22",
+        "rssi": -72
+      },
+      {
+        "id": "c-004",
+        "macAddress": "12:34:56:78:9a:bc",
+        "ipAddress": "192.168.1.40",
+        "name": "smart-tv",
+        "hostname": "livingroom-tv",
+        "type": "WIRELESS",
+        "access": {"type": "DEFAULT", "authorized": true},
+        "ssid": "SecureWiFi",
+        "accessPointMac": "aa:bb:cc:00:11:33",
+        "rssi": -62
+      }
+    ]
+  }
+}
+

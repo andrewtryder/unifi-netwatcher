@@ -68,6 +68,8 @@ class Settings(BaseSettings):
     PUBLIC_ORIGIN: str = ""
 
     UNIFI_URL: str = "https://unifi.example.local"
+    UNIFI_API_MODE: str = "legacy"
+    UNIFI_API_KEY: SecretStr = SecretStr("")
     UNIFI_USERNAME: str = "admin"
     UNIFI_PASSWORD: SecretStr = SecretStr("change-me")
     UNIFI_SITE: str = "default"
@@ -119,6 +121,14 @@ class Settings(BaseSettings):
             raise ValueError("PUBLIC_ORIGIN must not include a path, query, or fragment")
         return f"{parsed.scheme}://{parsed.netloc}"
 
+    @field_validator("UNIFI_API_MODE")
+    @classmethod
+    def _validate_api_mode(cls, value: str) -> str:
+        mode = (value or "legacy").strip().lower()
+        if mode not in ("legacy", "official", "auto"):
+            raise ValueError("UNIFI_API_MODE must be one of: legacy, official, auto")
+        return mode
+
     @field_validator("UNIFI_CA_BUNDLE")
     @classmethod
     def _validate_ca_bundle(cls, value: str) -> str:
@@ -149,9 +159,16 @@ class Settings(BaseSettings):
                     "a generated data/app-secret.key)"
                 )
         if self.APP_ENV == "production":
+            if self.UNIFI_API_MODE == "official":
+                api_key = self.UNIFI_API_KEY.get_secret_value().strip()
+                if not self.UNIFI_MOCK_MODE and not api_key:
+                    raise ValueError(
+                        "UNIFI_API_KEY must be configured when UNIFI_API_MODE is 'official'"
+                    )
             password = self.UNIFI_PASSWORD.get_secret_value().strip().lower()
             if (
-                not self.UNIFI_MOCK_MODE
+                self.UNIFI_API_MODE != "official"
+                and not self.UNIFI_MOCK_MODE
                 and password in _PLACEHOLDER_SECRETS
                 and self.UNIFI_URL.rstrip("/") != "https://unifi.example.local"
             ):
@@ -169,6 +186,9 @@ class Settings(BaseSettings):
 
     def unifi_password(self) -> str:
         return self.UNIFI_PASSWORD.get_secret_value()
+
+    def unifi_api_key(self) -> str:
+        return self.UNIFI_API_KEY.get_secret_value()
 
     def app_secret_key(self) -> str:
         return self.APP_SECRET_KEY.get_secret_value()

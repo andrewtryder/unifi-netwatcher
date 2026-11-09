@@ -126,6 +126,61 @@ class UniFiClientDevice(Mapping[str, Any]):
             raw_data=data,
         )
 
+    @classmethod
+    def from_official_dict(
+        cls, data: dict[str, Any], site_id: str | None = None
+    ) -> UniFiClientDevice:
+        """Create a normalized UniFiClientDevice from an official UniFi API client dict."""
+        mac = str(data.get("macAddress") or data.get("mac") or "").strip()
+        ip = data.get("ipAddress") or data.get("ip")
+        name = data.get("name")
+        hostname = data.get("hostname") or name
+
+        # Connection type: "WIRED" -> True, "WIRELESS" -> False, or direct is_wired boolean
+        client_type = data.get("type")
+        is_wired: bool | None = None
+        if isinstance(client_type, str):
+            upper_type = client_type.strip().upper()
+            if upper_type == "WIRED":
+                is_wired = True
+            elif upper_type in ("WIRELESS", "WIFI"):
+                is_wired = False
+        if is_wired is None:
+            is_wired = as_bool(data.get("is_wired"))
+
+        essid = data.get("ssid") or data.get("essid")
+        ap_mac = data.get("accessPointMac") or data.get("ap_mac")
+        rssi = data.get("rssi") or data.get("signal")
+        tx_rate = data.get("txRateBps") or data.get("txRate") or data.get("tx_rate")
+        rx_rate = data.get("rxRateBps") or data.get("rxRate") or data.get("rx_rate")
+        sw_port = data.get("switchPort") or data.get("sw_port")
+
+        return cls(
+            mac=mac,
+            ip=str(ip) if ip is not None else None,
+            hostname=str(hostname) if hostname is not None else None,
+            name=str(name) if name is not None else None,
+            is_wired=is_wired,
+            oui=data.get("oui"),
+            site_id=str(data.get("siteId") or site_id or ""),
+            essid=str(essid) if essid is not None else None,
+            ap_mac=str(ap_mac) if ap_mac is not None else None,
+            radio_proto=data.get("radioProto") or data.get("radio_proto"),
+            channel=as_int(data.get("channel")),
+            rssi=as_int(rssi),
+            satisfaction=as_int(data.get("satisfaction")),
+            tx_rate_bps=as_int(tx_rate),
+            rx_rate_bps=as_int(rx_rate),
+            tx_bytes_r=as_int(data.get("txBytesR") or data.get("tx_bytes-r")),
+            rx_bytes_r=as_int(data.get("rxBytesR") or data.get("rx_bytes-r")),
+            sw_port=as_int(sw_port),
+            dev_cat=data.get("devCat") or data.get("dev_cat"),
+            dev_family=data.get("devFamily") or data.get("dev_family"),
+            dev_vendor=data.get("devVendor") or data.get("dev_vendor"),
+            os_name=data.get("osName") or data.get("os_name"),
+            raw_data=data,
+        )
+
     def _keys(self) -> set[str]:
         keys = {f.name for f in fields(self) if f.name != "raw_data"}
         keys.update(self.raw_data.keys())
