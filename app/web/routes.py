@@ -7,6 +7,7 @@ from app.models import Device, Event, NotificationChannel, Observation
 from app.schemas import RenameRequest
 from app.services.context import request_context_from_request
 from app.services.devices import DeviceNotFoundError, DeviceService
+from app.services.notifications import get_behavioral_notification_rules
 from app.web.context import template_context
 from app.web.display import build_dashboard_metrics
 from app.web.pagination import clamp_pagination, device_status_counts, paginate
@@ -133,10 +134,11 @@ def logs_page(request: Request, db: Session = Depends(get_db)):
 @router.get("/notifications", response_class=HTMLResponse)
 def notifications_page(request: Request, db: Session = Depends(get_db)):
     channels = db.query(NotificationChannel).all()
+    rules = get_behavioral_notification_rules(db)
     return templates.TemplateResponse(
         request=request,
         name="notifications.html",
-        context=template_context(db, request, channels=channels),
+        context=template_context(db, request, channels=channels, rules=rules),
     )
 
 

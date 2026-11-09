@@ -1,9 +1,11 @@
 import logging
 import threading
+import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
+from sqlalchemy import distinct, func, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -21,6 +23,11 @@ from app.models import (
 from app.notifications import PROVIDERS
 from app.security.crypto_migrate import load_channel_config
 from app.services.connectivity import ConnectivityService, resolve_offline_thresholds
+from app.services.notifications import (
+    batch_devices_in_cooldown,
+    format_behavioral_alert_message,
+    get_behavioral_notification_rules,
+)
 from app.unifi import get_unifi_adapter
 from app.unifi.models import UniFiError, as_bool, as_int
 from app.unifi.status import sanitize_unifi_error
@@ -37,6 +44,8 @@ class AlertIntent:
     device_id: int
     mac: str
     message: str
+    event_type: str = "discovered"
+    source_event_id: int | None = None
 
 
 _as_int = as_int
@@ -100,17 +109,44 @@ def _devices_in_alert_cooldown(db: Session, device_ids: list[int], now: datetime
         return set()
     cooldown = timedelta(seconds=settings.ALERT_COOLDOWN_SECONDS)
     cutoff = now - cooldown
-    rows = (
-        db.query(Event.device_id)
+    sent_rows = (
+        db.query(Event.device_id, Event.metadata_json)
         .filter(
             Event.device_id.in_(device_ids),
             Event.event_type == "alert_sent",
             Event.created_at >= cutoff,
         )
-        .distinct()
         .all()
     )
-    return {row[0] for row in rows if row[0] is not None}
+    delivery_rows = (
+        db.query(Event.device_id, Event.metadata_json)
+        .join(NotificationDelivery, NotificationDelivery.event_id == Event.id)
+        .filter(
+            Event.device_id.in_(device_ids),
+            NotificationDelivery.success.is_(True),
+            NotificationDelivery.created_at >= cutoff,
+        )
+        .all()
+    )
+    queued_rows = (
+        db.query(Event.device_id, Event.metadata_json)
+        .filter(
+            Event.device_id.in_(device_ids),
+            Event.event_type == "alert_queued",
+            Event.created_at >= cutoff,
+        )
+        .all()
+    )
+    in_cooldown = set()
+    for row in sent_rows + delivery_rows + queued_rows:
+        dev_id = row[0]
+        meta = row[1]
+        alert_event_type = (
+            meta.get("event_type", "discovered") if isinstance(meta, dict) else "discovered"
+        )
+        if alert_event_type == "discovered" and dev_id is not None:
+            in_cooldown.add(dev_id)
+    return in_cooldown
 
 
 def _alert_message(device: Device) -> str:
@@ -123,58 +159,227 @@ def _alert_message(device: Device) -> str:
     )
 
 
-def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
-    """Send notification HTTP after scan commit; record deliveries in a short TX."""
+DEFAULT_ALERT_BATCH_LIMIT = 15
+DEFAULT_ALERT_BUDGET_SECONDS = 15.0
+DEFAULT_ALERT_EXPIRATION_HOURS = 48
+DEFAULT_ALERT_EXPIRATION_SECONDS = DEFAULT_ALERT_EXPIRATION_HOURS * 3600
+MAX_CHANNEL_ATTEMPTS = 3
+
+
+def _queue_alert_intents(
+    db: Session, intents: list[AlertIntent], now: datetime | None = None
+) -> list[Event]:
+    """Persist alert intents into durable alert_queued events in SQLite within reconciliation."""
     if not intents:
-        return
-
-    channels = db.query(NotificationChannel).filter(NotificationChannel.enabled.is_(True)).all()
-    if not channels:
-        return
-
+        return []
+    ts = now or utcnow()
+    queued_events: list[Event] = []
     for intent in intents:
+        # Prevent duplicate alert_queued events if one already exists for this source_event_id
+        if intent.source_event_id is not None:
+            existing = (
+                db.query(Event)
+                .filter(
+                    Event.device_id == intent.device_id,
+                    Event.event_type == "alert_queued",
+                )
+                .all()
+            )
+            already_queued = any(
+                isinstance(e.metadata_json, dict)
+                and e.metadata_json.get("source_event_id") == intent.source_event_id
+                for e in existing
+            )
+            if already_queued:
+                continue
+
         queued_event = Event(
             device_id=intent.device_id,
             event_type="alert_queued",
-            message=f"Queued alerts for {len(channels)} channels",
+            message=intent.message,
+            metadata_json={
+                "event_type": intent.event_type,
+                "source_event_id": intent.source_event_id,
+                "mac": intent.mac,
+            },
+            created_at=ts,
         )
         db.add(queued_event)
-        db.flush()
+        queued_events.append(queued_event)
+    db.flush()
+    return queued_events
 
-        sent_count = 0
-        for channel in channels:
+
+def _deliver_pending_alerts(
+    db: Session,
+    *,
+    batch_limit: int = DEFAULT_ALERT_BATCH_LIMIT,
+    budget_seconds: float = DEFAULT_ALERT_BUDGET_SECONDS,
+    expiration_seconds: float = DEFAULT_ALERT_EXPIRATION_SECONDS,
+) -> int:
+    """Deliver pending alert_queued events to enabled channels with bounded budget and per-channel tracking.
+
+    Returns the number of deliveries attempted in this run.
+    """
+    channels = db.query(NotificationChannel).filter(NotificationChannel.enabled.is_(True)).all()
+    if not channels:
+        return 0
+
+    enabled_channel_ids = [c.id for c in channels]
+
+    # Subquery of event_ids that already have successful deliveries for ALL enabled channels
+    fully_delivered_event_ids = (
+        db.query(NotificationDelivery.event_id)
+        .filter(
+            NotificationDelivery.channel_id.in_(enabled_channel_ids),
+            NotificationDelivery.success.is_(True),
+        )
+        .group_by(NotificationDelivery.event_id)
+        .having(func.count(distinct(NotificationDelivery.channel_id)) >= len(enabled_channel_ids))
+    )
+
+    # Pending-work-aware query: excludes completed events so they cannot starve newer pending work
+    queued_events = (
+        db.query(Event)
+        .filter(
+            Event.event_type == "alert_queued",
+            Event.id.not_in(fully_delivered_event_ids),
+            or_(
+                Event.metadata_json["resolved"].as_boolean().is_(False),
+                Event.metadata_json["resolved"].as_boolean().is_(None),
+            ),
+        )
+        .order_by(Event.created_at.asc(), Event.id.asc())
+        .limit(50)
+        .all()
+    )
+    if not queued_events:
+        return 0
+
+    event_ids = [e.id for e in queued_events]
+    deliveries = (
+        db.query(NotificationDelivery).filter(NotificationDelivery.event_id.in_(event_ids)).all()
+    )
+    successful_deliveries = {(d.event_id, d.channel_id) for d in deliveries if d.success}
+    attempt_counts: dict[tuple[int, int], int] = {}
+    for d in deliveries:
+        if d.event_id is not None and d.channel_id is not None:
+            attempt_counts[(d.event_id, d.channel_id)] = (
+                attempt_counts.get((d.event_id, d.channel_id), 0) + 1
+            )
+
+    now = utcnow()
+    deadline = time.monotonic() + budget_seconds
+    deliveries_attempted = 0
+
+    for q_event in queued_events:
+        meta = dict(q_event.metadata_json or {}) if isinstance(q_event.metadata_json, dict) else {}
+        created_at = q_event.created_at
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        age_seconds = (now - created_at).total_seconds()
+
+        # Explicit expiration policy: do not silently discard undelivered alerts
+        if age_seconds > expiration_seconds:
+            logger.warning(
+                "Queued alert %s for device %s expired after %d hours without complete delivery.",
+                q_event.id,
+                q_event.device_id,
+                int(expiration_seconds / 3600),
+            )
+            for channel in channels:
+                if (q_event.id, channel.id) not in successful_deliveries:
+                    db.add(
+                        NotificationDelivery(
+                            event_id=q_event.id,
+                            channel_id=channel.id,
+                            success=False,
+                            status_code=None,
+                            response=None,
+                            error=f"Alert expired: pending delivery exceeded {int(expiration_seconds / 3600)} hours",
+                            created_at=now,
+                        )
+                    )
+            db.add(
+                Event(
+                    device_id=q_event.device_id,
+                    event_type="alert_failed",
+                    severity="error",
+                    message=f"Alert expired after {int(expiration_seconds / 3600)} hours without complete delivery",
+                    metadata_json={
+                        "event_type": meta.get("event_type"),
+                        "source_event_id": meta.get("source_event_id"),
+                        "queued_event_id": q_event.id,
+                        "reason": "expired",
+                    },
+                    created_at=now,
+                )
+            )
+            meta["resolved"] = True
+            meta["expired"] = True
+            q_event.metadata_json = meta
+            db.commit()
+            continue
+
+        needed_channels = [
+            ch
+            for ch in channels
+            if (q_event.id, ch.id) not in successful_deliveries
+            and attempt_counts.get((q_event.id, ch.id), 0) < MAX_CHANNEL_ATTEMPTS
+        ]
+
+        if not needed_channels:
+            meta["resolved"] = True
+            q_event.metadata_json = meta
+            db.commit()
+            continue
+
+        msg = q_event.message or ""
+
+        for channel in needed_channels:
+            remaining_budget = deadline - time.monotonic()
+            if deliveries_attempted >= batch_limit or remaining_budget <= 0:
+                logger.warning(
+                    "Notification delivery budget reached (%d attempts, %.2fs remaining); deferring remaining alerts.",
+                    deliveries_attempted,
+                    max(0.0, remaining_budget),
+                )
+                return deliveries_attempted
+
             provider = PROVIDERS.get(channel.type)
             if not provider:
-                db.add(
-                    NotificationDelivery(
-                        event_id=queued_event.id,
-                        channel_id=channel.id,
-                        success=False,
-                        status_code=None,
-                        response=None,
-                        error=f"Unknown provider type: {channel.type}",
-                    )
+                delivery = NotificationDelivery(
+                    event_id=q_event.id,
+                    channel_id=channel.id,
+                    success=False,
+                    status_code=None,
+                    response=None,
+                    error=f"Unknown provider type: {channel.type}",
+                )
+                db.add(delivery)
+                db.commit()
+                deliveries_attempted += 1
+                attempt_counts[(q_event.id, channel.id)] = (
+                    attempt_counts.get((q_event.id, channel.id), 0) + 1
                 )
                 continue
 
             try:
                 config = load_channel_config(channel)
-                if not isinstance(config, dict):
+                if not isinstance(config, dict) or not provider.validate_config(config):
                     raise ValueError("Invalid channel configuration")
-                if not provider.validate_config(config):
-                    raise ValueError("Invalid channel configuration")
-                success, status_code, response, error = provider.send(intent.message, config)
+                success, status_code, response, error = provider.send(msg, config)
             except Exception as exc:
                 logger.warning(
-                    "Notification channel %s failed for device %s: %s",
+                    "Notification channel %s failed for event %s: %s",
                     channel.id,
-                    intent.device_id,
+                    q_event.id,
                     exc,
                 )
                 success, status_code, response, error = False, 0, "", str(exc)
 
             delivery = NotificationDelivery(
-                event_id=queued_event.id,
+                event_id=q_event.id,
                 channel_id=channel.id,
                 success=success,
                 status_code=status_code,
@@ -182,27 +387,79 @@ def _deliver_queued_alerts(db: Session, intents: list[AlertIntent]) -> None:
                 error=error,
             )
             db.add(delivery)
+            db.commit()
+            deliveries_attempted += 1
+            attempt_counts[(q_event.id, channel.id)] = (
+                attempt_counts.get((q_event.id, channel.id), 0) + 1
+            )
             if success:
-                sent_count += 1
+                successful_deliveries.add((q_event.id, channel.id))
 
-        if sent_count > 0:
+        # Record summary event for this attempt pass
+        successful_in_pass = [
+            ch for ch in needed_channels if (q_event.id, ch.id) in successful_deliveries
+        ]
+        if successful_in_pass:
             db.add(
                 Event(
-                    device_id=intent.device_id,
+                    device_id=q_event.device_id,
                     event_type="alert_sent",
-                    message=f"Sent {sent_count} alerts",
+                    message=f"Sent {len(successful_in_pass)} alerts",
+                    metadata_json={
+                        "event_type": meta.get("event_type"),
+                        "source_event_id": meta.get("source_event_id"),
+                        "queued_event_id": q_event.id,
+                        "sent_count": len(successful_in_pass),
+                    },
                 )
             )
-        else:
+        elif needed_channels:
             db.add(
                 Event(
-                    device_id=intent.device_id,
+                    device_id=q_event.device_id,
                     event_type="alert_failed",
                     message="All alerts failed",
+                    metadata_json={
+                        "event_type": meta.get("event_type"),
+                        "source_event_id": meta.get("source_event_id"),
+                        "queued_event_id": q_event.id,
+                    },
                 )
             )
 
-    db.commit()
+        # Check if all channels for this event are now resolved (succeeded or exhausted)
+        remaining_needed = [
+            ch
+            for ch in channels
+            if (q_event.id, ch.id) not in successful_deliveries
+            and attempt_counts.get((q_event.id, ch.id), 0) < MAX_CHANNEL_ATTEMPTS
+        ]
+        if not remaining_needed:
+            meta["resolved"] = True
+            q_event.metadata_json = meta
+        db.commit()
+
+    return deliveries_attempted
+
+
+def _deliver_queued_alerts(
+    db: Session,
+    intents: list[AlertIntent] | None = None,
+    *,
+    batch_limit: int = DEFAULT_ALERT_BATCH_LIMIT,
+    budget_seconds: float = DEFAULT_ALERT_BUDGET_SECONDS,
+    expiration_seconds: float = DEFAULT_ALERT_EXPIRATION_SECONDS,
+) -> None:
+    """Queues new intents if provided, and delivers pending alerts within budget."""
+    if intents:
+        _queue_alert_intents(db, intents)
+        db.commit()
+    _deliver_pending_alerts(
+        db,
+        batch_limit=batch_limit,
+        budget_seconds=budget_seconds,
+        expiration_seconds=expiration_seconds,
+    )
 
 
 def run_scan(db: Session, source: str = "scheduled") -> dict:
@@ -300,6 +557,8 @@ def _run_scan_locked(db: Session, source: str) -> dict:
             missed_scans_threshold=missed_threshold,
             grace_seconds=grace_threshold,
         )
+        rules = get_behavioral_notification_rules(db)
+        behavioral_cooldown_pairs: set[tuple[int, str]] = set()
 
         # First pass: upsert devices/observations; apply connectivity updates for observed clients
         unknown_candidates: list[Device] = []
@@ -358,16 +617,40 @@ def _run_scan_locked(db: Session, source: str) -> dict:
 
                 transition = connectivity.handle_observed_device(device, now)
                 if transition and transition.event_type:
-                    db.add(
-                        Event(
-                            device_id=device.id,
-                            event_type=transition.event_type,
-                            severity="info",
-                            message=transition.event_message,
-                            metadata_json=transition.event_metadata,
-                            created_at=now,
-                        )
+                    event = Event(
+                        device_id=device.id,
+                        event_type=transition.event_type,
+                        severity="info",
+                        message=transition.event_message,
+                        metadata_json=transition.event_metadata,
+                        created_at=now,
                     )
+                    db.add(event)
+                    db.flush()
+                    if rules.is_enabled(transition.event_type):
+                        active_cooldowns = batch_devices_in_cooldown(
+                            db,
+                            [(device.id, transition.event_type)],
+                            rules.cooldown_seconds,
+                            now,
+                        )
+                        pair = (device.id, transition.event_type)
+                        if pair not in active_cooldowns and pair not in behavioral_cooldown_pairs:
+                            alert_intents.append(
+                                AlertIntent(
+                                    device_id=device.id,
+                                    mac=device.mac,
+                                    message=format_behavioral_alert_message(
+                                        transition.event_type,
+                                        device,
+                                        transition.event_metadata,
+                                        now,
+                                    ),
+                                    event_type=transition.event_type,
+                                    source_event_id=event.id,
+                                )
+                            )
+                            behavioral_cooldown_pairs.add(pair)
 
             db.add(
                 Observation(
@@ -409,16 +692,40 @@ def _run_scan_locked(db: Session, source: str) -> dict:
         for device in absent_devices:
             transition = connectivity.handle_absent_device(device, now)
             if transition and transition.event_type:
-                db.add(
-                    Event(
-                        device_id=device.id,
-                        event_type=transition.event_type,
-                        severity="info",
-                        message=transition.event_message,
-                        metadata_json=transition.event_metadata,
-                        created_at=now,
-                    )
+                event = Event(
+                    device_id=device.id,
+                    event_type=transition.event_type,
+                    severity="info",
+                    message=transition.event_message,
+                    metadata_json=transition.event_metadata,
+                    created_at=now,
                 )
+                db.add(event)
+                db.flush()
+                if rules.is_enabled(transition.event_type):
+                    active_cooldowns = batch_devices_in_cooldown(
+                        db,
+                        [(device.id, transition.event_type)],
+                        rules.cooldown_seconds,
+                        now,
+                    )
+                    pair = (device.id, transition.event_type)
+                    if pair not in active_cooldowns and pair not in behavioral_cooldown_pairs:
+                        alert_intents.append(
+                            AlertIntent(
+                                device_id=device.id,
+                                mac=device.mac,
+                                message=format_behavioral_alert_message(
+                                    transition.event_type,
+                                    device,
+                                    transition.event_metadata,
+                                    now,
+                                ),
+                                event_type=transition.event_type,
+                                source_event_id=event.id,
+                            )
+                        )
+                        behavioral_cooldown_pairs.add(pair)
 
         cooldown_ids = _devices_in_alert_cooldown(db, [d.id for d in unknown_candidates], now)
         for device in unknown_candidates:
@@ -434,6 +741,10 @@ def _run_scan_locked(db: Session, source: str) -> dict:
             )
             # Prevent duplicate intents for the same device within one scan
             cooldown_ids.add(device.id)
+
+        # Persist alert intents durably into SQLite before commit
+        if alert_intents:
+            _queue_alert_intents(db, alert_intents, now)
 
         if not clients_data:
             message = f"Scan completed: 0 active clients on UniFi site ({source})"
@@ -458,9 +769,9 @@ def _run_scan_locked(db: Session, source: str) -> dict:
 
     logger.info("Scan finished successfully")
 
-    # HTTP notifications outside the scan write window
+    # HTTP notifications outside the scan write window with bounded delivery budget
     try:
-        _deliver_queued_alerts(db, alert_intents)
+        _deliver_pending_alerts(db)
     except Exception:
         logger.exception("Failed to deliver scan alerts")
 

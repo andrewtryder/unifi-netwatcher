@@ -14,6 +14,10 @@ from app.notifications import PROVIDERS
 from app.notifications.schemas import parse_notification_config
 from app.security.crypto_migrate import load_channel_config, store_channel_config
 from app.security.secrets import SecretKeyError
+from app.services.notifications import (
+    BehavioralNotificationRules,
+    save_behavioral_notification_rules,
+)
 from app.web.context import template_context
 from app.web.templates_env import templates
 
@@ -112,4 +116,53 @@ def test_channel(channel_id: int, db: Session = Depends(get_db)):
         return HTMLResponse("<span class='text-secondary text-xs font-bold'>Test OK!</span>")
     return HTMLResponse(
         f"<span class='text-error text-xs font-bold'>Failed: {escape(str(err or sc))}</span>"
+    )
+
+
+@router.post("/htmx/rules", response_class=HTMLResponse)
+def update_rules(
+    request: Request,
+    notify_device_disconnected: str | None = Form(None),
+    notify_device_reconnected: str | None = Form(None),
+    notify_device_ssid_changed: str | None = Form(None),
+    notify_device_ap_changed: str | None = Form(None),
+    notify_device_network_changed: str | None = Form(None),
+    cooldown_seconds: int = Form(3600),
+    db: Session = Depends(get_db),
+):
+    if cooldown_seconds < 0 or cooldown_seconds > 604800:
+        return _error_html("Cooldown must be between 0 and 604,800 seconds (7 days)")
+
+    rules = BehavioralNotificationRules(
+        notify_device_disconnected=str(notify_device_disconnected or "").lower()
+        in ("true", "1", "yes", "on"),
+        notify_device_reconnected=str(notify_device_reconnected or "").lower()
+        in ("true", "1", "yes", "on"),
+        notify_device_ssid_changed=str(notify_device_ssid_changed or "").lower()
+        in ("true", "1", "yes", "on"),
+        notify_device_ap_changed=str(notify_device_ap_changed or "").lower()
+        in ("true", "1", "yes", "on"),
+        notify_device_network_changed=str(notify_device_network_changed or "").lower()
+        in ("true", "1", "yes", "on"),
+        cooldown_seconds=cooldown_seconds,
+    )
+    save_behavioral_notification_rules(db, rules)
+    record_event(
+        db,
+        "notification_rules_updated",
+        "Updated behavioral notification rules",
+        severity="info",
+        metadata={
+            "notify_device_disconnected": rules.notify_device_disconnected,
+            "notify_device_reconnected": rules.notify_device_reconnected,
+            "notify_device_ssid_changed": rules.notify_device_ssid_changed,
+            "notify_device_ap_changed": rules.notify_device_ap_changed,
+            "notify_device_network_changed": rules.notify_device_network_changed,
+            "cooldown_seconds": rules.cooldown_seconds,
+        },
+    )
+    db.commit()
+
+    return HTMLResponse(
+        "<span class='text-secondary text-xs font-semibold'>Notification rules saved successfully!</span>"
     )
