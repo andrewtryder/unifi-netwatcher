@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.5.1). If provided, publishes semver tags; otherwise publishes sha and latest."
+        required: false
+        type: string
 
 concurrency:
   group: release-${{ github.ref }}
@@ -77,8 +82,36 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || needs.release-please.outputs.tag_name }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && (inputs.tag || github.sha) || needs.release-please.outputs.tag_name }}
           persist-credentials: false
+
+      - name: Resolve release metadata
+        id: release-info
+        env:
+          DISPATCH_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag_name }}
+          IS_RELEASE_CREATED: ${{ needs.release-please.outputs.release_created }}
+        run: |
+          set -euo pipefail
+          head_sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=12 HEAD)"
+          echo "head_sha=${head_sha}" >> "$GITHUB_OUTPUT"
+          echo "candidate_ghcr=ghcr.io/andrewtryder/unifi-netwatcher:candidate-${short_sha}" >> "$GITHUB_OUTPUT"
+
+          target_tag=""
+          if [ "${IS_RELEASE_CREATED}" = "true" ] && [ -n "${RELEASE_TAG}" ]; then
+            target_tag="${RELEASE_TAG}"
+          elif [ -n "${DISPATCH_TAG}" ]; then
+            target_tag="${DISPATCH_TAG}"
+          fi
+
+          if [ -n "${target_tag}" ]; then
+            echo "target_tag=${target_tag}" >> "$GITHUB_OUTPUT"
+            echo "is_semver_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "target_tag=" >> "$GITHUB_OUTPUT"
+            echo "is_semver_release=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
@@ -106,22 +139,41 @@ jobs:
           images: |
             ghcr.io/andrewtryder/unifi-netwatcher
             andrewtryder/unifi-netwatcher
+          flavor: |
+            latest=false
           tags: |
-            type=semver,pattern={{version}},enable=${{ github.event_name != 'workflow_dispatch' }}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ github.event_name != 'workflow_dispatch' }}
-            type=semver,pattern={{major}},enable=${{ github.event_name != 'workflow_dispatch' }}
-            type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' }}
-            type=raw,value=latest
+            type=semver,pattern={{version}},value=${{ steps.release-info.outputs.target_tag }},enable=${{ steps.release-info.outputs.is_semver_release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.release-info.outputs.target_tag }},enable=${{ steps.release-info.outputs.is_semver_release == 'true' }}
+            type=raw,value=latest,enable=${{ steps.release-info.outputs.is_semver_release == 'true' }}
+            type=sha,format=short,enable=${{ steps.release-info.outputs.is_semver_release != 'true' }}
+            type=raw,value=latest,enable=${{ steps.release-info.outputs.is_semver_release != 'true' }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.release-info.outputs.head_sha }}
 
-      - name: Candidate tag
-        id: candidate
+      - name: Assert expected release tags
+        if: ${{ steps.release-info.outputs.is_semver_release == 'true' }}
         env:
-          SHA: ${{ github.sha }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          EXPECTED_TAG: ${{ steps.release-info.outputs.target_tag }}
         run: |
           set -euo pipefail
-          short="$(printf '%s' "$SHA" | cut -c1-12)"
-          echo "tag=candidate-${short}" >> "$GITHUB_OUTPUT"
-          echo "ghcr=ghcr.io/andrewtryder/unifi-netwatcher:candidate-${short}" >> "$GITHUB_OUTPUT"
+          echo "Generated tags:"
+          printf '%s\n' "${TAGS}"
+
+          # Strip leading 'v' if present
+          clean_ver="${EXPECTED_TAG#v}"
+
+          for prefix in "ghcr.io/andrewtryder/unifi-netwatcher" "andrewtryder/unifi-netwatcher"; do
+            if ! printf '%s\n' "${TAGS}" | grep -q "^${prefix}:${clean_ver}$"; then
+              echo "Assertion failed: Missing expected version tag '${prefix}:${clean_ver}'" >&2
+              exit 1
+            fi
+            if ! printf '%s\n' "${TAGS}" | grep -q "^${prefix}:latest$"; then
+              echo "Assertion failed: Missing expected tag '${prefix}:latest'" >&2
+              exit 1
+            fi
+          done
+          echo "Assertion passed: Expected release tags are present."
 
       - name: Build and push candidate
         id: build
@@ -130,7 +182,7 @@ jobs:
           context: .
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: ${{ steps.candidate.outputs.ghcr }}
+          tags: ${{ steps.release-info.outputs.candidate_ghcr }}
           labels: ${{ steps.meta.outputs.labels }}
           provenance: true
           sbom: true
@@ -171,10 +223,10 @@ jobs:
           done
 
       - name: Publish digest to release notes
-        if: ${{ needs.release-please.outputs.release_created == 'true' }}
+        if: ${{ steps.release-info.outputs.is_semver_release == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.release-please.outputs.tag_name }}
+          TAG: ${{ steps.release-info.outputs.target_tag }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           set -euo pipefail
