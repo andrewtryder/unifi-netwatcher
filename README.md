@@ -76,6 +76,18 @@ Open **http://localhost:8080** (or `http://YOUR-SERVER-IP:8080`). Sign in with *
 
 That's it. The dashboard will start showing the devices reported by UniFi. You can use **Test UniFi Connection** on the dashboard if nothing appears.
 
+## Install on Proxmox VE (LXC)
+
+From your **Proxmox VE host shell as root**, run:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/andrewtryder/unifi-netwatcher/main/scripts/install-proxmox.sh)"
+```
+
+The installer asks for your UniFi controller details, then creates a **new unprivileged Debian 13 LXC** with Docker and NetWatcher inside it. It uses DHCP on `vmbr0`, selects an available CT ID and storage, and installs the pinned `0.5.1` image. It **does not install Docker on the Proxmox host**. Change the NetWatcher `admin / admin` password immediately after opening the displayed URL.
+
+The command executes a downloaded script as root: [review the script](scripts/install-proxmox.sh) first. For a custom ID or bridge, prefix the command with `VMID=120 BRIDGE=vmbr1`. Proxmox needs a downloadable Debian 13 template, an Internet connection and a DHCP-enabled bridge. Nested Docker requires `nesting` and `keyctl` and has more isolation limitations than Docker inside a full VM; use a VM if you prefer that arrangement. Back up the CT (including its Docker volume) after setup.
+
 ## Everyday use
 
 - **Review devices:** Open the device list to see new, trusted, and ignored devices. Trust or ignore a device with a click. Approval status is separate from whether a device is currently online.
