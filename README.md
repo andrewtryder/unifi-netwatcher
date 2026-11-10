@@ -24,6 +24,19 @@ It runs in a single Docker container and uses information from your existing Uni
 
 Your device history is stored locally in SQLite. NetWatcher is designed for one UniFi controller and site per installation.
 
+## UniFi version compatibility
+
+NetWatcher connects to the UniFi Network application. Its version is separate from the UniFi OS version running on your console or server.
+
+| UniFi Network version | What to know |
+|---|---|
+| **10.6 and earlier** | NetWatcher uses the classic controller API (`legacy`) by default, or the official API (`official`) where API keys are supported. Not every older release has been individually tested. |
+| **11.x** | Requires UniFi OS 6.0+. Ubiquiti still provides a local Network API, but NetWatcher has not yet been tested end-to-end on Network 11. Check connectivity and device inventory before relying on alerts. |
+
+**What's new in Network 11?** Ubiquiti changed its database and statistics system (old UniFi statistics history resets), ended support for USG gateways and the standalone Network Application Server, and migrated sites to zone-based firewall rules. NetWatcher reads current client inventory—not UniFi's old statistics reports—and keeps its own history in SQLite. Network 11 also introduces a built-in client connection alarm; NetWatcher's alerts remain a separate feature.
+
+See [Ubiquiti's Network 11 release notes](https://community.ui.com/releases/UniFi-Network-Application-11-0-97/15662d06-8122-44e2-a1ba-af5d71b8a045) and [official Network API documentation](https://help.ui.com/hc/en-us/articles/30076656117655-Getting-Started-with-the-Official-UniFi-API) for details.
+
 ## Get started
 
 You'll need Docker with Compose and access to a UniFi Network controller.
