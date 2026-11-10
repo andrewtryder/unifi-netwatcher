@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.5.0...v0.5.1) (2026-11-10)
+
+
+### Bug Fixes
+
+* **docker:** strip unused base pip packages and automate uv.lock release sync ([#69](https://github.com/andrewtryder/unifi-netwatcher/issues/69)) ([0359e42](https://github.com/andrewtryder/unifi-netwatcher/commit/0359e42881429d74ae99c0f1cdb8db31d2a1ab34))
+
 ## [0.5.0](https://github.com/andrewtryder/unifi-netwatcher/compare/v0.4.0...v0.5.0) (2026-11-09)
 
 
