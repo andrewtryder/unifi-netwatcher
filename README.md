@@ -31,7 +31,7 @@ NetWatcher connects to the UniFi Network application. Its version is separate fr
 | UniFi Network version | What to know |
 |---|---|
 | **10.6 and earlier** | NetWatcher uses the classic controller API (`legacy`) by default, or the official API (`official`) where API keys are supported. Not every older release has been individually tested. |
-| **11.x** | Requires UniFi OS 6.0+. Ubiquiti still provides a local Network API, but NetWatcher has not yet been tested end-to-end on Network 11. Check connectivity and device inventory before relying on alerts. |
+| **11.x** | Requires UniFi OS 6.0+. Tested with UniFi Network 11.x using the Legacy API for client inventory and Wi-Fi telemetry. Check connectivity and device inventory before relying on alerts. |
 
 **What's new in Network 11?** Ubiquiti changed its database and statistics system (old UniFi statistics history resets), ended support for USG gateways and the standalone Network Application Server, and migrated sites to zone-based firewall rules. NetWatcher reads current client inventory—not UniFi's old statistics reports—and keeps its own history in SQLite. Network 11 also introduces a built-in client connection alarm; NetWatcher's alerts remain a separate feature.
 
